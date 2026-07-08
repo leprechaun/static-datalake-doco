@@ -1,11 +1,16 @@
 /* ── State ──────────────────────────────────────────────────────── */
 let catalog = null;
 let currentTable = null;
+let catalogBase = "";
 
 /* ── Boot ───────────────────────────────────────────────────────── */
 async function init() {
   try {
-    const res = await fetch("catalog.json");
+    const params = new URLSearchParams(location.search);
+    const catalogUrl = params.get("catalog") || "catalog.json";
+    const catalogAbsolute = new URL(catalogUrl, location.href);
+    catalogBase = catalogAbsolute.href.slice(0, catalogAbsolute.href.lastIndexOf("/") + 1);
+    const res = await fetch(catalogAbsolute.href);
     if (!res.ok) throw new Error(res.statusText);
     catalog = await res.json();
   } catch (e) {
@@ -17,9 +22,10 @@ async function init() {
   }
 
   document.getElementById("loading").style.display = "none";
-  buildTree();
-  const hash = location.hash.replace(/^#\/?/, "");
-  if (hash) {
+  const hash = location.hash.replace(/^#/, "");
+  if (hash.startsWith("?filter=")) {
+    showOverview(decodeURIComponent(hash.slice(8)));
+  } else if (hash) {
     showTable(decodeURIComponent(hash));
   } else {
     showOverview();
@@ -27,127 +33,153 @@ async function init() {
 }
 
 window.addEventListener("hashchange", () => {
-  const hash = location.hash.replace(/^#\/?/, "");
-  if (hash) showTable(decodeURIComponent(hash));
-  else showOverview();
+  const hash = location.hash.replace(/^#/, "");
+  if (hash.startsWith("?filter=")) {
+    const filter = decodeURIComponent(hash.slice(8));
+    if (currentTable === null) {
+      const input = document.getElementById("index-filter");
+      if (input) input.value = filter;
+      renderIndexRows(filter);
+    } else {
+      showOverview(filter);
+    }
+  } else if (hash) {
+    showTable(decodeURIComponent(hash));
+  } else {
+    showOverview();
+  }
 });
 
-/* ── Sidebar tree ───────────────────────────────────────────────── */
-function buildTreeStructure(tables) {
-  // Each node: { children: { segment: node }, tables: [entry, ...] }
-  const root = { children: {}, tables: [] };
-  for (const t of tables) {
-    const parts = t.name.split("/");
-    const folderParts = parts.slice(0, -1);
-    let node = root;
-    for (const part of folderParts) {
-      if (!node.children[part]) node.children[part] = { children: {}, tables: [] };
-      node = node.children[part];
-    }
-    node.tables.push(t);
-  }
-  return root;
-}
-
-function buildTree(filter = "") {
-  const tree = document.getElementById("tree");
-  tree.innerHTML = "";
-  if (!catalog) return;
-
-  const lower = filter.toLowerCase();
-  const tables = catalog.tables.filter(
-    t => !lower || t.name.toLowerCase().includes(lower)
-  );
-
-  tree.appendChild(renderTreeNode(buildTreeStructure(tables), 0));
-}
-
-function renderTreeNode(node, depth) {
-  const frag = document.createDocumentFragment();
-  const indent = 16 + depth * 14;
-
-  for (const key of Object.keys(node.children).sort()) {
-    const child = node.children[key];
-    const group = document.createElement("div");
-    group.className = "tree-group";
-
-    const folderEl = document.createElement("div");
-    folderEl.className = "tree-folder";
-    folderEl.style.paddingLeft = `${indent}px`;
-    folderEl.innerHTML = `<span class="chevron">▾</span>${key}`;
-    folderEl.addEventListener("click", () => {
-      group.classList.toggle("collapsed");
-      folderEl.classList.toggle("collapsed");
-    });
-
-    const childrenEl = document.createElement("div");
-    childrenEl.className = "tree-children";
-    childrenEl.appendChild(renderTreeNode(child, depth + 1));
-
-    group.appendChild(folderEl);
-    group.appendChild(childrenEl);
-    frag.appendChild(group);
-  }
-
-  for (const t of node.tables) {
-    frag.appendChild(makeTreeItem(t, depth));
-  }
-
-  return frag;
-}
-
-function makeTreeItem(entry, depth = 0) {
-  const el = document.createElement("div");
-  el.className = "tree-item";
-  el.dataset.name = entry.name;
-  el.style.paddingLeft = `${28 + depth * 14}px`;
-  el.textContent = entry.name.split("/").pop();
-  el.title = entry.name;
-  el.addEventListener("click", () => {
-    location.hash = encodeURIComponent(entry.name);
-  });
-  return el;
-}
-
-function setActiveTreeItem(name) {
-  document.querySelectorAll(".tree-item").forEach(el => {
-    el.classList.toggle("active", el.dataset.name === name);
-  });
-}
-
 /* ── Overview ───────────────────────────────────────────────────── */
-function showOverview() {
+function showOverview(filter = "") {
   currentTable = null;
-  document.getElementById("overview").style.display = "grid";
+  document.getElementById("overview").style.display = "block";
   document.getElementById("detail").style.display = "none";
   document.getElementById("breadcrumb").textContent = "";
   document.getElementById("topbar").querySelector("h1").textContent = "Tables";
-  setActiveTreeItem(null);
 
-  const grid = document.getElementById("overview");
-  grid.innerHTML = "";
+  const wrap = document.getElementById("overview");
 
   if (!catalog || catalog.tables.length === 0) {
-    grid.innerHTML = `<div class="empty-state"><h3>No tables found</h3><p>Run <code>datalake-doco generate</code> to scan your datalake.</p></div>`;
+    wrap.innerHTML = `<div class="empty-state"><h3>No tables found</h3><p>Run <code>datalake-doco generate</code> to scan your datalake.</p></div>`;
     return;
   }
 
-  for (const entry of catalog.tables) {
-    const card = document.createElement("div");
-    card.className = "table-card";
-    card.innerHTML = `
-      <div class="card-name" title="${entry.name}">${entry.name}</div>
-      <div class="card-meta">
-        <span>${entry.row_count.toLocaleString()} rows</span>
-        <span>${entry.column_count} columns</span>
-        <span class="badge">delta</span>
-      </div>
-    `;
-    card.addEventListener("click", () => {
-      location.hash = encodeURIComponent(entry.name);
-    });
-    grid.appendChild(card);
+  wrap.innerHTML = `
+    <div class="index-filter-wrap">
+      <input id="index-filter" type="search" placeholder="Filter tables…" autocomplete="off" value="${esc(filter)}">
+    </div>
+    <div class="index-table-wrap">
+      <table class="index-table">
+        <thead>
+          <tr>
+            <th>Table</th>
+            <th class="num-col">Rows</th>
+            <th class="num-col">Columns</th>
+            <th>Last Refreshed</th>
+          </tr>
+        </thead>
+        <tbody id="index-tbody"></tbody>
+      </table>
+    </div>
+  `;
+
+  renderIndexRows(filter);
+
+  document.getElementById("index-filter").addEventListener("input", e => {
+    const val = e.target.value;
+    history.replaceState(null, "", val
+      ? "#?filter=" + encodeURIComponent(val)
+      : location.pathname + location.search
+    );
+    renderIndexRows(val);
+  });
+}
+
+function renderIndexRows(filter) {
+  const lower = (filter || "").toLowerCase();
+  const tables = lower
+    ? catalog.tables.filter(t => t.name.toLowerCase().includes(lower))
+    : catalog.tables;
+
+  const groups = {};
+  for (const t of tables) {
+    const parts = t.name.split("/");
+    const source = parts[0] || "";
+    const layer = parts.length > 2 ? parts.slice(1, -1).join("/") : (parts[1] || "");
+    const leaf = parts[parts.length - 1];
+    if (!groups[source]) groups[source] = {};
+    if (!groups[source][layer]) groups[source][layer] = [];
+    groups[source][layer].push({ entry: t, leaf });
   }
+
+  const rows = [];
+  for (const source of Object.keys(groups).sort()) {
+    rows.push(
+      `<tr class="group-source" data-source="${esc(source)}">` +
+      `<td colspan="4"><span class="chevron">▾</span>${esc(source)}</td>` +
+      `</tr>`
+    );
+    for (const layer of Object.keys(groups[source]).sort()) {
+      rows.push(
+        `<tr class="group-layer" data-source="${esc(source)}" data-layer="${esc(layer)}">` +
+        `<td colspan="4"><span class="chevron">▾</span>${esc(layer)}</td>` +
+        `</tr>`
+      );
+      for (const { entry, leaf } of groups[source][layer]) {
+        const date = entry.generated_at ? entry.generated_at.slice(0, 10) : "—";
+        rows.push(
+          `<tr class="index-row" data-source="${esc(source)}" data-layer="${esc(layer)}" data-name="${esc(entry.name)}">` +
+          `<td class="table-leaf">${esc(leaf)}</td>` +
+          `<td class="num-col">${entry.row_count.toLocaleString()}</td>` +
+          `<td class="num-col">${entry.column_count}</td>` +
+          `<td class="date-col">${esc(date)}</td>` +
+          `</tr>`
+        );
+      }
+    }
+  }
+
+  const tbody = document.getElementById("index-tbody");
+  if (!tbody) return;
+  tbody.innerHTML = rows.join("");
+
+  tbody.querySelectorAll(".group-source").forEach(srcRow => {
+    srcRow.addEventListener("click", () => {
+      const src = srcRow.dataset.source;
+      const collapsed = srcRow.classList.toggle("collapsed");
+      tbody.querySelectorAll(`.group-layer[data-source="${src}"]`).forEach(lr => {
+        lr.hidden = collapsed;
+      });
+      tbody.querySelectorAll(`.index-row[data-source="${src}"]`).forEach(row => {
+        if (collapsed) {
+          row.hidden = true;
+        } else {
+          const lyr = row.dataset.layer;
+          const lr = tbody.querySelector(`.group-layer[data-source="${src}"][data-layer="${lyr}"]`);
+          row.hidden = lr ? lr.classList.contains("collapsed") : false;
+        }
+      });
+    });
+  });
+
+  tbody.querySelectorAll(".group-layer").forEach(lyrRow => {
+    lyrRow.addEventListener("click", e => {
+      e.stopPropagation();
+      const src = lyrRow.dataset.source;
+      const lyr = lyrRow.dataset.layer;
+      const collapsed = lyrRow.classList.toggle("collapsed");
+      tbody.querySelectorAll(`.index-row[data-source="${src}"][data-layer="${lyr}"]`).forEach(row => {
+        row.hidden = collapsed;
+      });
+    });
+  });
+
+  tbody.querySelectorAll(".index-row").forEach(row => {
+    row.addEventListener("click", () => {
+      location.hash = encodeURIComponent(row.dataset.name);
+    });
+  });
 }
 
 /* ── Detail view ────────────────────────────────────────────────── */
@@ -156,7 +188,6 @@ async function showTable(name) {
   if (!entry) { showOverview(); return; }
 
   currentTable = name;
-  setActiveTreeItem(name);
   document.getElementById("overview").style.display = "none";
   document.getElementById("detail").style.display = "block";
   document.getElementById("topbar").querySelector("h1").textContent = name.split("/").pop();
@@ -168,7 +199,7 @@ async function showTable(name) {
 
   let doc;
   try {
-    const res = await fetch(entry.doc_path);
+    const res = await fetch(catalogBase + entry.doc_path);
     if (!res.ok) throw new Error(res.statusText);
     doc = await res.json();
   } catch (e) {
@@ -345,11 +376,6 @@ function renderHistory(doc) {
     </table>
   </div>`;
 }
-
-/* ── Search ─────────────────────────────────────────────────────── */
-document.getElementById("search").addEventListener("input", e => {
-  buildTree(e.target.value);
-});
 
 /* ── Helpers ────────────────────────────────────────────────────── */
 function esc(s) {

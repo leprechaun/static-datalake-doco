@@ -29,10 +29,11 @@ def write_output(catalog: Catalog, table_docs: list[TableDoc], output_dir: Path)
         doc_file.parent.mkdir(parents=True, exist_ok=True)
         doc_file.write_text(json.dumps(_to_dict(doc), indent=2), encoding="utf-8")
 
-    _copy_frontend(output_dir)
+    copy_frontend(output_dir)
 
 
-def _copy_frontend(output_dir: Path) -> None:
+def copy_frontend(output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
     frontend_src = Path(__file__).parent / "frontend"
     for asset in frontend_src.iterdir():
         shutil.copy2(asset, output_dir / asset.name)

@@ -8,7 +8,7 @@ import typer
 from datalake_doco.models import Catalog, CatalogEntry
 from datalake_doco.readers import get_reader
 from datalake_doco.scanner import scan
-from datalake_doco.writer import write_output
+from datalake_doco.writer import copy_frontend, write_output
 
 app = typer.Typer(help="Generate static documentation for a datalake.")
 
@@ -102,4 +102,14 @@ def generate(
     write_output(catalog, table_docs, output)
 
     typer.echo(f"\nDone. {len(table_docs)} table(s) documented → {output}")
+    typer.echo(f"Serve with: python -m http.server 8000 --directory {output}")
+
+
+@app.command()
+def publish(
+    output: Path = typer.Option(Path("./datalake-docs"), "--output", "-o", help="Output directory."),
+) -> None:
+    """Copy the frontend (HTML/CSS/JS) to the output directory without re-profiling tables."""
+    copy_frontend(output)
+    typer.echo(f"Frontend published → {output}")
     typer.echo(f"Serve with: python -m http.server 8000 --directory {output}")
