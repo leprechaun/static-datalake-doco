@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Datalake Docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside id="sidebar">
+  <div id="sidebar-header">Datalake Docs</div>
+  <div id="sidebar-search">
+    <input id="search" type="search" placeholder="Filter tables…" autocomplete="off">
+  </div>
+  <div id="tree"></div>
+</aside>
+
+<!-- Main -->
+<div id="main">
+  <div id="topbar">
+    <h1>Tables</h1>
+    <div id="breadcrumb"></div>
+  </div>
+  <div id="content">
+    <div id="loading">Loading catalog…</div>
+    <div id="overview" style="display:none"></div>
+    <div id="detail" style="display:none"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

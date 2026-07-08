@@ -1,0 +1,20 @@
+[project]
+name = "datalake-doco"
+version = "0.1.0"
+description = "Static documentation generator for datalakes"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "typer>=0.12",
+    "deltalake>=0.19",
+    "polars>=1.0",
+    "fsspec>=2024.2",
+    "s3fs>=2024.2",
+]
+
+[project.scripts]
+datalake-doco = "datalake_doco.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
