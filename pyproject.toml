@@ -15,6 +15,12 @@ dependencies = [
 [project.scripts]
 datalake-doco = "datalake_doco.cli:app"
 
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

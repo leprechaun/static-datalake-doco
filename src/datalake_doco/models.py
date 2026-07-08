@@ -13,52 +13,72 @@ class HistoryEntry:
 
 
 @dataclass
-class ColumnSchema:
+class Column:
     name: str
-    type: str
+    dataType: str
     nullable: bool
+    ordinalPosition: int
+    precision: int | None = None
+    scale: int | None = None
 
 
 @dataclass
-class ColumnStats:
-    count: float | None = None
+class ColumnProfile:
+    name: str
+    timestamp: str
+    valuesCount: float | None = None
+    nullCount: float | None = None
     mean: float | None = None
-    std: float | None = None
+    stddev: float | None = None
     min: float | None = None
-    p25: float | None = None
-    p50: float | None = None
-    p75: float | None = None
+    firstQuartile: float | None = None
+    median: float | None = None
+    thirdQuartile: float | None = None
     max: float | None = None
-    unique: int | None = None
+    uniqueCount: int | None = None
     top: str | None = None
     freq: int | None = None
 
 
 @dataclass
+class TableProfile:
+    timestamp: str
+    rowCount: int
+    columnCount: int
+    columnProfile: list[ColumnProfile]
+
+
+@dataclass
+class SampleData:
+    columns: list[str]
+    rows: list[list[Any]]
+
+
+@dataclass
 class TableDoc:
     name: str
+    fullyQualifiedName: str
     uri: str
-    generated_at: str
-    format: str
-    row_count: int
-    schema: list[ColumnSchema]
-    statistics: dict[str, ColumnStats]
-    sample_data: list[dict[str, Any]] = field(default_factory=list)
-    history: list[HistoryEntry] = field(default_factory=list)
+    updatedAt: str
+    columns: list[Column]
+    tableProfile: TableProfile
+    sampleData: SampleData | None = None
+    extension: dict[str, Any] | None = None
 
 
 @dataclass
 class CatalogEntry:
+    fullyQualifiedName: str
     name: str
     uri: str
-    doc_path: str
-    generated_at: str
-    row_count: int
-    column_count: int
+    docPath: str
+    updatedAt: str
+    rowCount: int
+    columnCount: int
 
 
 @dataclass
 class Catalog:
-    generated_at: str
+    generatedAt: str
     sources: list[str]
     tables: list[CatalogEntry]

@@ -3,40 +3,41 @@ from datetime import datetime, timezone
 import deltalake
 import polars as pl
 
-from datalake_doco.models import ColumnSchema, HistoryEntry, TableDoc
+from datalake_doco.models import Column, ColumnProfile, HistoryEntry, SampleData, TableDoc, TableProfile
 from datalake_doco.profiler import profile
 
 
-def _polars_type_name(dtype: pl.DataType) -> str:
+def _polars_type(dtype: pl.DataType) -> tuple[str, int | None, int | None]:
+    """Return (dataType, precision, scale) for an OpenMetadata column."""
     mapping = {
-        pl.Int8: "tinyint",
-        pl.Int16: "smallint",
-        pl.Int32: "int",
-        pl.Int64: "bigint",
-        pl.UInt8: "tinyint",
-        pl.UInt16: "smallint",
-        pl.UInt32: "int",
-        pl.UInt64: "bigint",
-        pl.Float32: "float",
-        pl.Float64: "double",
-        pl.Boolean: "boolean",
-        pl.String: "string",
-        pl.Utf8: "string",
-        pl.Date: "date",
-        pl.Binary: "binary",
+        pl.Int8: ("TINYINT", None, None),
+        pl.Int16: ("SMALLINT", None, None),
+        pl.Int32: ("INT", None, None),
+        pl.Int64: ("BIGINT", None, None),
+        pl.UInt8: ("TINYINT", None, None),
+        pl.UInt16: ("SMALLINT", None, None),
+        pl.UInt32: ("INT", None, None),
+        pl.UInt64: ("BIGINT", None, None),
+        pl.Float32: ("FLOAT", None, None),
+        pl.Float64: ("DOUBLE", None, None),
+        pl.Boolean: ("BOOLEAN", None, None),
+        pl.String: ("STRING", None, None),
+        pl.Utf8: ("STRING", None, None),
+        pl.Date: ("DATE", None, None),
+        pl.Binary: ("BINARY", None, None),
     }
-    for cls, name in mapping.items():
+    for cls, result in mapping.items():
         if isinstance(dtype, cls):
-            return name
+            return result
     if isinstance(dtype, pl.Datetime):
-        return "timestamp"
+        return ("TIMESTAMP", None, None)
     if isinstance(dtype, pl.Decimal):
-        return f"decimal({dtype.precision},{dtype.scale})"
+        return ("DECIMAL", dtype.precision, dtype.scale)
     if isinstance(dtype, (pl.List, pl.Array)):
-        return "array"
+        return ("ARRAY", None, None)
     if isinstance(dtype, pl.Struct):
-        return "struct"
-    return str(dtype).lower()
+        return ("STRUCT", None, None)
+    return (str(dtype).upper(), None, None)
 
 
 def _parse_history(raw: list[dict]) -> list[HistoryEntry]:
@@ -67,44 +68,84 @@ class DeltaReader:
         except Exception:
             return False
 
-    def read(self, uri: str, name: str, sample_count: int = 0, storage_options: dict | None = None) -> TableDoc:
+    def read(self, uri: str, name: str, sample_count: int = 0, storage_options: dict | None = None, history_limit: int | None = None) -> TableDoc:
         dt = deltalake.DeltaTable(uri, storage_options=storage_options)
-        history = _parse_history(dt.history())
+        history = _parse_history(dt.history(limit=history_limit))
 
         df = pl.read_delta(uri, storage_options=storage_options)
 
-        schema = [
-            ColumnSchema(
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        delta_schema = dt.schema()
+        nullable_by_name = {f.name: f.nullable for f in delta_schema.fields}
+
+        columns = []
+        for pos, (col, dtype) in enumerate(df.schema.items(), start=1):
+            data_type, precision, scale = _polars_type(dtype)
+            columns.append(Column(
                 name=col,
-                type=_polars_type_name(dtype),
-                nullable=True,
-            )
-            for col, dtype in df.schema.items()
-        ]
+                dataType=data_type,
+                nullable=nullable_by_name.get(col, True),
+                ordinalPosition=pos,
+                precision=precision,
+                scale=scale,
+            ))
 
-        stats = profile(df)
+        raw_stats = profile(df)
+        column_profiles = []
+        for col, s in raw_stats.items():
+            column_profiles.append(ColumnProfile(
+                name=col,
+                timestamp=timestamp,
+                valuesCount=s.get("valuesCount"),
+                nullCount=s.get("nullCount"),
+                mean=s.get("mean"),
+                stddev=s.get("stddev"),
+                min=s.get("min"),
+                firstQuartile=s.get("firstQuartile"),
+                median=s.get("median"),
+                thirdQuartile=s.get("thirdQuartile"),
+                max=s.get("max"),
+                uniqueCount=s.get("uniqueCount"),
+                top=s.get("top"),
+                freq=s.get("freq"),
+            ))
 
-        sample_data: list[dict] = []
+        table_profile = TableProfile(
+            timestamp=timestamp,
+            rowCount=df.height,
+            columnCount=len(columns),
+            columnProfile=column_profiles,
+        )
+
+        sample_data: SampleData | None = None
         if sample_count > 0:
+            col_names = [c.name for c in columns]
+            rows = []
             for row in df.head(sample_count).to_dicts():
-                clean = {}
-                for k, v in row.items():
+                clean = []
+                for k in col_names:
+                    v = row[k]
                     if isinstance(v, (str, int, float, bool, type(None))):
-                        clean[k] = v
+                        clean.append(v)
                     elif hasattr(v, "isoformat"):
-                        clean[k] = v.isoformat()
+                        clean.append(v.isoformat())
                     else:
-                        clean[k] = str(v)
-                sample_data.append(clean)
+                        clean.append(str(v))
+                rows.append(clean)
+            sample_data = SampleData(columns=col_names, rows=rows)
+
+        parts = name.split("/")
+        short_name = parts[-1]
+        fqn = ".".join(parts)
 
         return TableDoc(
-            name=name,
+            name=short_name,
+            fullyQualifiedName=fqn,
             uri=uri,
-            generated_at=datetime.now(timezone.utc).isoformat(),
-            format="delta",
-            row_count=df.height,
-            schema=schema,
-            statistics=stats,
-            sample_data=sample_data,
-            history=history,
+            updatedAt=timestamp,
+            columns=columns,
+            tableProfile=table_profile,
+            sampleData=sample_data,
+            extension={"deltaHistory": history} if history else None,
         )

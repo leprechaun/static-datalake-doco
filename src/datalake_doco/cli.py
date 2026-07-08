@@ -1,12 +1,12 @@
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
 
 from datalake_doco.models import Catalog, CatalogEntry
-from datalake_doco.readers import get_reader
+from datalake_doco.readers.delta import DeltaReader
 from datalake_doco.scanner import scan
 from datalake_doco.writer import copy_frontend, write_output
 
@@ -18,11 +18,9 @@ def _profile_table(
     table_name: str,
     sample_count: int,
     storage_options: dict | None,
+    history_limit: int | None,
 ) -> tuple:
-    reader = get_reader(table_uri, storage_options=storage_options)
-    if reader is None:
-        return None, table_name, table_uri
-    doc = reader.read(table_uri, table_name, sample_count=sample_count, storage_options=storage_options)
+    doc = DeltaReader().read(table_uri, table_name, sample_count=sample_count, storage_options=storage_options, history_limit=history_limit)
     return doc, table_name, table_uri
 
 
@@ -33,6 +31,7 @@ def generate(
     sample_data_count: int = typer.Option(0, "--sample-data-count", help="Number of sample rows to include per table."),
     sample_data_exclude_tables: str = typer.Option("", "--sample-data-exclude-tables", help="Comma-separated table names to exclude from sample data."),
     workers: int = typer.Option(8, "--workers", "-w", help="Number of parallel workers for profiling tables."),
+    history_limit: int = typer.Option(None, "--history-limit", help="Max number of history entries to include per table (default: unlimited)."),
 ) -> None:
     generated_at = datetime.now(timezone.utc).isoformat()
 
@@ -51,14 +50,15 @@ def generate(
     table_docs = []
     catalog_entries = []
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
+    with ProcessPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(
                 _profile_table,
                 table_uri,
                 table_name,
-                0 if table_name in excluded else sample_data_count,
+                0 if table_name.replace("/", ".") in excluded else sample_data_count,
                 storage_options,
+                history_limit,
             ): (table_uri, table_name)
             for table_uri, table_name in all_discovered
         }
@@ -75,26 +75,27 @@ def generate(
                 typer.echo(f"  [skip] No reader for {table_uri}", err=True)
                 continue
 
-            typer.echo(f"  Profiled {table_name}")
+            typer.echo(f"  Profiled {doc.fullyQualifiedName}")
             table_docs.append(doc)
 
-            doc_path = f"tables/{table_name}.json"
+            doc_path = f"tables/{doc.fullyQualifiedName.replace('.', '/')}.json"
             catalog_entries.append(
                 CatalogEntry(
-                    name=table_name,
+                    fullyQualifiedName=doc.fullyQualifiedName,
+                    name=doc.name,
                     uri=table_uri,
-                    doc_path=doc_path,
-                    generated_at=doc.generated_at,
-                    row_count=doc.row_count,
-                    column_count=len(doc.schema),
+                    docPath=doc_path,
+                    updatedAt=doc.updatedAt,
+                    rowCount=doc.tableProfile.rowCount,
+                    columnCount=doc.tableProfile.columnCount,
                 )
             )
 
-    table_docs.sort(key=lambda d: d.name)
-    catalog_entries.sort(key=lambda e: e.name)
+    table_docs.sort(key=lambda d: d.fullyQualifiedName)
+    catalog_entries.sort(key=lambda e: e.fullyQualifiedName)
 
     catalog = Catalog(
-        generated_at=generated_at,
+        generatedAt=generated_at,
         sources=uris,
         tables=catalog_entries,
     )

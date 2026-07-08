@@ -26,7 +26,8 @@ async function init() {
   if (hash.startsWith("?filter=")) {
     showOverview(decodeURIComponent(hash.slice(8)));
   } else if (hash) {
-    showTable(decodeURIComponent(hash));
+    const { table, tab } = parseHash(hash);
+    showTable(table, tab);
   } else {
     showOverview();
   }
@@ -44,7 +45,8 @@ window.addEventListener("hashchange", () => {
       showOverview(filter);
     }
   } else if (hash) {
-    showTable(decodeURIComponent(hash));
+    const { table, tab } = parseHash(hash);
+    showTable(table, tab);
   } else {
     showOverview();
   }
@@ -99,14 +101,14 @@ function showOverview(filter = "") {
 function renderIndexRows(filter) {
   const lower = (filter || "").toLowerCase();
   const tables = lower
-    ? catalog.tables.filter(t => t.name.toLowerCase().includes(lower))
+    ? catalog.tables.filter(t => t.fullyQualifiedName.toLowerCase().includes(lower))
     : catalog.tables;
 
   const groups = {};
   for (const t of tables) {
-    const parts = t.name.split("/");
+    const parts = t.fullyQualifiedName.split(".");
     const source = parts[0] || "";
-    const layer = parts.length > 2 ? parts.slice(1, -1).join("/") : (parts[1] || "");
+    const layer = parts.length > 2 ? parts.slice(1, -1).join(".") : (parts[1] || "");
     const leaf = parts[parts.length - 1];
     if (!groups[source]) groups[source] = {};
     if (!groups[source][layer]) groups[source][layer] = [];
@@ -127,12 +129,12 @@ function renderIndexRows(filter) {
         `</tr>`
       );
       for (const { entry, leaf } of groups[source][layer]) {
-        const date = entry.generated_at ? entry.generated_at.slice(0, 10) : "—";
+        const date = entry.updatedAt ? entry.updatedAt.slice(0, 10) : "—";
         rows.push(
-          `<tr class="index-row" data-source="${esc(source)}" data-layer="${esc(layer)}" data-name="${esc(entry.name)}">` +
+          `<tr class="index-row" data-source="${esc(source)}" data-layer="${esc(layer)}" data-name="${esc(entry.fullyQualifiedName)}">` +
           `<td class="table-leaf">${esc(leaf)}</td>` +
-          `<td class="num-col">${entry.row_count.toLocaleString()}</td>` +
-          `<td class="num-col">${entry.column_count}</td>` +
+          `<td class="num-col">${entry.rowCount.toLocaleString()}</td>` +
+          `<td class="num-col">${entry.columnCount}</td>` +
           `<td class="date-col">${esc(date)}</td>` +
           `</tr>`
         );
@@ -183,14 +185,14 @@ function renderIndexRows(filter) {
 }
 
 /* ── Detail view ────────────────────────────────────────────────── */
-async function showTable(name) {
-  const entry = catalog && catalog.tables.find(t => t.name === name);
+async function showTable(name, tab = null) {
+  const entry = catalog && catalog.tables.find(t => t.fullyQualifiedName === name);
   if (!entry) { showOverview(); return; }
 
   currentTable = name;
   document.getElementById("overview").style.display = "none";
   document.getElementById("detail").style.display = "block";
-  document.getElementById("topbar").querySelector("h1").textContent = name.split("/").pop();
+  document.getElementById("topbar").querySelector("h1").textContent = name.split(".").pop();
   document.getElementById("breadcrumb").innerHTML =
     `<span onclick="location.hash=''">Tables</span> / ${name}`;
 
@@ -199,7 +201,7 @@ async function showTable(name) {
 
   let doc;
   try {
-    const res = await fetch(catalogBase + entry.doc_path);
+    const res = await fetch(catalogBase + entry.docPath);
     if (!res.ok) throw new Error(res.statusText);
     doc = await res.json();
   } catch (e) {
@@ -208,23 +210,25 @@ async function showTable(name) {
   }
 
   detail.innerHTML = renderDetail(doc);
-  activateTab(detail.querySelector(".tab"));
+  const tabEl = (tab && detail.querySelector(`.tab[data-panel="${tab}"]`)) || detail.querySelector(".tab");
+  activateTab(tabEl);
 }
 
 function renderDetail(doc) {
-  const ts = doc.generated_at;
-  const hasSamples = doc.sample_data && doc.sample_data.length > 0;
-  const hasHistory = doc.history && doc.history.length > 0;
+  const ts = doc.updatedAt;
+  const rowCount = doc.tableProfile?.rowCount;
+  const colCount = doc.columns?.length ?? 0;
+  const hasSamples = doc.sampleData?.rows?.length > 0;
+  const hasHistory = doc.extension?.deltaHistory?.length > 0;
 
   return `
     <div class="detail-header">
-      <div class="detail-title">${doc.name}</div>
+      <div class="detail-title">${doc.fullyQualifiedName ?? doc.name}</div>
       <div class="detail-meta">
-        <span>${doc.row_count.toLocaleString()} rows</span>
-        <span>${doc.schema.length} columns</span>
-        <span class="badge">${doc.format}</span>
-        <span>Generated ${ts}</span>
-        <span title="${doc.uri}" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${doc.uri}</span>
+        ${rowCount != null ? `<span>${rowCount.toLocaleString()} rows</span>` : ""}
+        <span>${colCount} columns</span>
+        <span>Updated ${ts}</span>
+        ${doc.uri ? `<span title="${doc.uri}" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${doc.uri}</span>` : ""}
       </div>
     </div>
 
@@ -253,14 +257,15 @@ function activateTab(tabEl) {
   tabEl.classList.add("active");
   const panel = container.querySelector(`#panel-${tabEl.dataset.panel}`);
   if (panel) panel.classList.add("active");
+  history.replaceState(null, "", `#${encodeURIComponent(currentTable)}/${tabEl.dataset.panel}`);
 }
 
 /* ── Schema tab ─────────────────────────────────────────────────── */
 function renderSchema(doc) {
-  const rows = doc.schema.map(col => `
+  const rows = (doc.columns || []).map(col => `
     <tr>
       <td>${esc(col.name)}</td>
-      <td><span class="type-badge">${esc(col.type)}</span></td>
+      <td><span class="type-badge">${esc(col.dataType)}</span></td>
       <td>${col.nullable ? "" : '<span style="color:#dc3545">✗</span>'}</td>
     </tr>
   `).join("");
@@ -275,23 +280,26 @@ function renderSchema(doc) {
 
 /* ── Stats tab ──────────────────────────────────────────────────── */
 function renderStats(doc) {
-  const cols = doc.schema.map(c => c.name);
+  const cols = (doc.columns || []).map(c => c.name);
+  const profileByName = {};
+  for (const p of (doc.tableProfile?.columnProfile || [])) {
+    profileByName[p.name] = p;
+  }
 
-  // Determine which stat keys are present across any column
-  const numericKeys = ["count","mean","std","min","p25","p50","p75","max"];
-  const catKeys = ["count","unique","top","freq"];
+  const numericKeys = ["valuesCount", "mean", "stddev", "min", "firstQuartile", "median", "thirdQuartile", "max"];
+  const catKeys = ["valuesCount", "uniqueCount", "top", "freq"];
 
-  const hasNumeric = cols.some(c => doc.statistics[c]?.mean != null);
-  const hasCat = cols.some(c => doc.statistics[c]?.unique != null);
+  const hasNumeric = cols.some(c => profileByName[c]?.mean != null);
+  const hasCat = cols.some(c => profileByName[c]?.uniqueCount != null);
 
   const headerKeys = hasNumeric
     ? numericKeys
-    : (hasCat ? catKeys : ["count"]);
+    : (hasCat ? catKeys : ["valuesCount"]);
 
   const headerLabels = {
-    count: "count", mean: "mean", std: "std dev",
-    min: "min", p25: "25%", p50: "50%", p75: "75%", max: "max",
-    unique: "unique", top: "top", freq: "freq"
+    valuesCount: "count", mean: "mean", stddev: "std dev",
+    min: "min", firstQuartile: "25%", median: "50%", thirdQuartile: "75%", max: "max",
+    uniqueCount: "unique", top: "top", freq: "freq",
   };
 
   const headers = ["column", ...headerKeys].map(k =>
@@ -299,7 +307,7 @@ function renderStats(doc) {
   ).join("");
 
   const rows = cols.map(col => {
-    const s = doc.statistics[col] || {};
+    const s = profileByName[col] || {};
     const cells = headerKeys.map(k => {
       const v = s[k];
       if (v === null || v === undefined) return `<td class="null-cell">—</td>`;
@@ -319,12 +327,11 @@ function renderStats(doc) {
 
 /* ── Sample Data tab ────────────────────────────────────────────── */
 function renderSampleData(doc) {
-  if (!doc.sample_data || doc.sample_data.length === 0) return "";
-  const cols = doc.schema.map(c => c.name);
-  const headers = cols.map(c => `<th>${esc(c)}</th>`).join("");
-  const rows = doc.sample_data.map(row => {
-    const cells = cols.map(c => {
-      const v = row[c];
+  if (!doc.sampleData?.rows?.length) return "";
+  const { columns, rows } = doc.sampleData;
+  const headers = columns.map(c => `<th>${esc(c)}</th>`).join("");
+  const bodyRows = rows.map(row => {
+    const cells = row.map(v => {
       if (v === null || v === undefined) return `<td class="null-cell">null</td>`;
       return `<td>${esc(String(v))}</td>`;
     }).join("");
@@ -334,16 +341,17 @@ function renderSampleData(doc) {
   return `<div class="data-table-wrap">
     <table>
       <thead><tr>${headers}</tr></thead>
-      <tbody>${rows}</tbody>
+      <tbody>${bodyRows}</tbody>
     </table>
   </div>`;
 }
 
 /* ── History tab ────────────────────────────────────────────────── */
 function renderHistory(doc) {
-  if (!doc.history || doc.history.length === 0) return "";
+  const history = doc.extension?.deltaHistory;
+  if (!history?.length) return "";
 
-  const rows = doc.history.map(h => {
+  const rows = history.map(h => {
     const params = Object.keys(h.parameters).length
       ? Object.entries(h.parameters)
           .map(([k, v]) => `<span class="param-key">${esc(k)}</span> ${esc(String(v))}`)
@@ -378,6 +386,12 @@ function renderHistory(doc) {
 }
 
 /* ── Helpers ────────────────────────────────────────────────────── */
+function parseHash(raw) {
+  const slash = raw.indexOf("/");
+  if (slash === -1) return { table: decodeURIComponent(raw), tab: null };
+  return { table: decodeURIComponent(raw.slice(0, slash)), tab: raw.slice(slash + 1) };
+}
+
 function esc(s) {
   return String(s)
     .replace(/&/g, "&amp;")

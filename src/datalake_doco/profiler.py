@@ -2,8 +2,6 @@ import math
 
 import polars as pl
 
-from datalake_doco.models import ColumnStats
-
 
 def _safe_float(val) -> float | None:
     if val is None:
@@ -15,10 +13,10 @@ def _safe_float(val) -> float | None:
         return None
 
 
-def profile(df: pl.DataFrame) -> dict[str, ColumnStats]:
+def profile(df: pl.DataFrame) -> dict[str, dict]:
+    """Return per-column statistics with OpenMetadata-aligned field names."""
     desc = df.describe()
 
-    # Pivot describe output into {col: {stat: value}}
     col_stats: dict[str, dict] = {}
     for row in desc.iter_rows(named=True):
         stat = row["statistic"]
@@ -27,22 +25,23 @@ def profile(df: pl.DataFrame) -> dict[str, ColumnStats]:
                 continue
             col_stats.setdefault(col, {})[stat] = val
 
-    result: dict[str, ColumnStats] = {}
+    result: dict[str, dict] = {}
     for col in df.columns:
         s = col_stats.get(col, {})
         dtype = df[col].dtype
 
         if dtype.is_numeric():
-            result[col] = ColumnStats(
-                count=_safe_float(s.get("count")),
-                mean=_safe_float(s.get("mean")),
-                std=_safe_float(s.get("std")),
-                min=_safe_float(s.get("min")),
-                p25=_safe_float(s.get("25%")),
-                p50=_safe_float(s.get("50%")),
-                p75=_safe_float(s.get("75%")),
-                max=_safe_float(s.get("max")),
-            )
+            result[col] = {
+                "valuesCount": _safe_float(s.get("count")),
+                "nullCount": _safe_float(s.get("null_count")),
+                "mean": _safe_float(s.get("mean")),
+                "stddev": _safe_float(s.get("std")),
+                "min": _safe_float(s.get("min")),
+                "firstQuartile": _safe_float(s.get("25%")),
+                "median": _safe_float(s.get("50%")),
+                "thirdQuartile": _safe_float(s.get("75%")),
+                "max": _safe_float(s.get("max")),
+            }
         else:
             vc = df[col].drop_nulls().value_counts(sort=True)
             top: str | None = None
@@ -53,11 +52,12 @@ def profile(df: pl.DataFrame) -> dict[str, ColumnStats]:
                 top = v.isoformat() if hasattr(v, "isoformat") else str(v)
                 freq = int(top_row["count"])
 
-            result[col] = ColumnStats(
-                count=_safe_float(s.get("count")),
-                unique=df[col].n_unique(),
-                top=top,
-                freq=freq,
-            )
+            result[col] = {
+                "valuesCount": _safe_float(s.get("count")),
+                "nullCount": _safe_float(s.get("null_count")),
+                "uniqueCount": df[col].n_unique(),
+                "top": top,
+                "freq": freq,
+            }
 
     return result
