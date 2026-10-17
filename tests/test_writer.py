@@ -1,15 +1,13 @@
 import json
 
 import pytest
-
 from conftest import FIXED_TS
+
 from datalake_doco.models import (
     Catalog,
     CatalogEntry,
     Column,
     ColumnProfile,
-    HistoryEntry,
-    SampleData,
     TableDoc,
     TableProfile,
 )
@@ -21,7 +19,7 @@ def make_column(name="id", data_type="BIGINT", nullable=True, ordinal=1, partiti
 
 
 def make_profile(name="id", **kwargs):
-    defaults = dict(timestamp=FIXED_TS, valuesCount=3.0, nullCount=0.0)
+    defaults = {"timestamp": FIXED_TS, "valuesCount": 3.0, "nullCount": 0.0}
     defaults.update(kwargs)
     return ColumnProfile(name=name, **defaults)
 

@@ -8,7 +8,7 @@ class Reader(Protocol):
     def read(self, uri: str, name: str, sample_count: int = 0, storage_options: dict | None = None) -> TableDoc: ...
 
 
-from datalake_doco.readers.delta import DeltaReader  # noqa: E402
+from datalake_doco.readers.delta import DeltaReader
 
 READERS: list[Reader] = [DeltaReader()]
 

@@ -6,7 +6,6 @@ import pytest
 
 from datalake_doco.profiler import profile
 
-
 # ── Numeric columns ───────────────────────────────────────────────────────────
 
 def test_numeric_stats_fields_present():

@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import polars as pl
 import pytest
+from conftest import make_field, make_mock_dt
 
-from conftest import FIXED_TS, make_field, make_mock_dt
 from datalake_doco.readers.delta import DeltaReader
 
 

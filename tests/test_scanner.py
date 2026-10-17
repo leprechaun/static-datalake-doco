@@ -1,4 +1,3 @@
-import pytest
 
 from datalake_doco.scanner import scan
 

@@ -1,9 +1,16 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import deltalake
 import polars as pl
 
-from datalake_doco.models import Column, ColumnProfile, HistoryEntry, SampleData, TableDoc, TableProfile
+from datalake_doco.models import (
+    Column,
+    ColumnProfile,
+    HistoryEntry,
+    SampleData,
+    TableDoc,
+    TableProfile,
+)
 from datalake_doco.profiler import profile
 
 
@@ -45,7 +52,7 @@ def _parse_history(raw: list[dict]) -> list[HistoryEntry]:
     for item in raw:
         ts = item.get("timestamp")
         if isinstance(ts, (int, float)):
-            ts = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).isoformat()
+            ts = datetime.fromtimestamp(ts / 1000, tz=UTC).isoformat()
         elif ts is None:
             ts = ""
 
@@ -75,7 +82,7 @@ class DeltaReader:
         lf = pl.scan_delta(uri, storage_options=storage_options)
         schema = lf.collect_schema()
 
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).isoformat()
 
         delta_schema = dt.schema()
         nullable_by_name = {f.name: f.nullable for f in delta_schema.fields}

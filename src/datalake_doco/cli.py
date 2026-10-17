@@ -1,28 +1,29 @@
+import argparse
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
-import typer
 
 from datalake_doco.models import Catalog, CatalogEntry, TableDoc
 from datalake_doco.readers.delta import DeltaReader
 from datalake_doco.scanner import scan
-from datalake_doco.writer import copy_frontend, init_output_dir, write_catalog, write_table_doc
+from datalake_doco.writer import (
+    copy_frontend,
+    init_output_dir,
+    write_catalog,
+    write_table_doc,
+)
 
-app = typer.Typer(help="Generate static documentation for a datalake.")
 
-
-@app.command()
 def generate(
-    uris: list[str] = typer.Argument(..., help="One or more URIs to scan (S3 or local paths)."),
-    output: Path = typer.Option(Path("./datalake-docs"), "--output", "-o", help="Output directory."),
-    sample_data_count: int = typer.Option(0, "--sample-data-count", help="Number of sample rows to include per table."),
-    sample_data_exclude_tables: str = typer.Option("", "--sample-data-exclude-tables", help="Comma-separated table names to exclude from sample data."),
-    history_limit: int = typer.Option(None, "--history-limit", help="Max number of history entries to include per table (default: unlimited)."),
+    uris: list[str],
+    output: Path,
+    sample_data_count: int,
+    sample_data_exclude_tables: str,
+    history_limit: int | None,
 ) -> None:
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
 
     excluded = {t.strip() for t in sample_data_exclude_tables.split(",") if t.strip()}
 
@@ -31,9 +32,9 @@ def generate(
 
     all_discovered: list[tuple[str, str]] = []
     for uri in uris:
-        typer.echo(f"Scanning {uri} ...")
+        print(f"Scanning {uri} ...")
         discovered = scan(uri, endpoint_url=endpoint_url)
-        typer.echo(f"  Found {len(discovered)} table(s)")
+        print(f"  Found {len(discovered)} table(s)")
         all_discovered.extend(discovered)
 
     total = len(all_discovered)
@@ -89,15 +90,46 @@ def generate(
         sys.stdout.flush()
         record(table_uri, doc)
 
-    typer.echo(f"\nDone. {len(table_docs)} table(s) documented → {output}")
-    typer.echo(f"Serve with: python -m http.server 8000 --directory {output}")
+    print(f"\nDone. {len(table_docs)} table(s) documented → {output}")
+    print(f"Serve with: python -m http.server 8000 --directory {output}")
 
 
-@app.command()
-def publish(
-    output: Path = typer.Option(Path("./datalake-docs"), "--output", "-o", help="Output directory."),
-) -> None:
+def publish(output: Path) -> None:
     """Copy the frontend (HTML/CSS/JS) to the output directory without re-profiling tables."""
     copy_frontend(output)
-    typer.echo(f"Frontend published → {output}")
-    typer.echo(f"Serve with: python -m http.server 8000 --directory {output}")
+    print(f"Frontend published → {output}")
+    print(f"Serve with: python -m http.server 8000 --directory {output}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="datalake-doco",
+        description="Generate static documentation for a datalake.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    generate_parser = subparsers.add_parser("generate", help="Scan URIs, profile tables, write output.")
+    generate_parser.add_argument("uris", nargs="+", help="One or more URIs to scan (S3 or local paths).")
+    generate_parser.add_argument("--output", "-o", type=Path, default=Path("./datalake-docs"), help="Output directory.")
+    generate_parser.add_argument("--sample-data-count", type=int, default=0, help="Number of sample rows to include per table.")
+    generate_parser.add_argument("--sample-data-exclude-tables", default="", help="Comma-separated table names to exclude from sample data.")
+    generate_parser.add_argument("--history-limit", type=int, default=None, help="Max number of history entries to include per table (default: unlimited).")
+    generate_parser.set_defaults(func=lambda args: generate(
+        args.uris, args.output, args.sample_data_count, args.sample_data_exclude_tables, args.history_limit,
+    ))
+
+    publish_parser = subparsers.add_parser("publish", help="Copy frontend assets without re-profiling tables.")
+    publish_parser.add_argument("--output", "-o", type=Path, default=Path("./datalake-docs"), help="Output directory.")
+    publish_parser.set_defaults(func=lambda args: publish(args.output))
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,14 +1,20 @@
+import io
 import json
+from contextlib import redirect_stdout
+from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
-
 from conftest import FIXED_TS
-from datalake_doco.cli import app
-from datalake_doco.models import Column, ColumnProfile, SampleData, TableDoc, TableProfile
-from datalake_doco.readers.delta import DeltaReader
 
-runner = CliRunner()
+from datalake_doco import cli
+from datalake_doco.models import (
+    Column,
+    ColumnProfile,
+    SampleData,
+    TableDoc,
+    TableProfile,
+)
+from datalake_doco.readers.delta import DeltaReader
 
 
 def _make_table(path):
@@ -51,8 +57,27 @@ def mock_reader(monkeypatch):
     monkeypatch.setattr(DeltaReader, "read", _read)
 
 
-def _invoke(*args):
-    return runner.invoke(app, list(args), catch_exceptions=False)
+class _Result:
+    def __init__(self, exit_code: int, output: str):
+        self.exit_code = exit_code
+        self.output = output
+
+
+def _invoke(*args) -> _Result:
+    """Run cli.main() with the given argv, capturing stdout and exit code.
+
+    Mirrors the shape of typer's old CliRunner.invoke() result so the test
+    bodies below stay close to what they were.
+    """
+    buf = io.StringIO()
+    exit_code = 0
+    try:
+        with redirect_stdout(buf):
+            cli.main(list(args))
+    except SystemExit as exc:
+        code = exc.code
+        exit_code = 0 if code is None else (code if isinstance(code, int) else 1)
+    return _Result(exit_code, buf.getvalue())
 
 
 # ── Basic smoke ───────────────────────────────────────────────────────────────
@@ -141,7 +166,7 @@ def test_failed_table_is_skipped(tmp_path):
     _make_table(tmp_path / "broken")
     _make_table(tmp_path / "valid")
     out = tmp_path / "out"
-    result = runner.invoke(app, ["generate", str(tmp_path), "--output", str(out)])
+    result = _invoke("generate", str(tmp_path), "--output", str(out))
     assert result.exit_code == 0
     names = {t["name"] for t in json.loads((out / "catalog.json").read_text())["tables"]}
     assert "valid" in names
@@ -151,5 +176,52 @@ def test_failed_table_is_skipped(tmp_path):
 def test_failed_table_error_message_in_output(tmp_path):
     _make_table(tmp_path / "broken")
     out = tmp_path / "out"
-    result = runner.invoke(app, ["generate", str(tmp_path), "--output", str(out)])
+    result = _invoke("generate", str(tmp_path), "--output", str(out))
     assert "[error]" in result.output
+
+
+# ── Argparse wiring ───────────────────────────────────────────────────────────
+
+def test_uris_is_required():
+    with pytest.raises(SystemExit) as exc_info:
+        cli.build_parser().parse_args(["generate"])
+    assert exc_info.value.code == 2
+
+
+def test_missing_command_is_required():
+    with pytest.raises(SystemExit) as exc_info:
+        cli.build_parser().parse_args([])
+    assert exc_info.value.code == 2
+
+
+def test_generate_defaults():
+    args = cli.build_parser().parse_args(["generate", "some-uri"])
+    assert args.uris == ["some-uri"]
+    assert args.output == Path("./datalake-docs")
+    assert args.sample_data_count == 0
+    assert args.sample_data_exclude_tables == ""
+    assert args.history_limit is None
+
+
+def test_generate_accepts_multiple_positional_uris():
+    args = cli.build_parser().parse_args(["generate", "uri-a", "uri-b", "uri-c"])
+    assert args.uris == ["uri-a", "uri-b", "uri-c"]
+
+
+def test_output_short_and_long_flags_are_equivalent():
+    parser = cli.build_parser()
+    long_args = parser.parse_args(["generate", "uri", "--output", "/tmp/x"])
+    short_args = parser.parse_args(["generate", "uri", "-o", "/tmp/x"])
+    assert long_args.output == short_args.output
+
+
+def test_sample_data_count_is_coerced_to_int():
+    args = cli.build_parser().parse_args(["generate", "uri", "--sample-data-count", "7"])
+    assert args.sample_data_count == 7
+    assert isinstance(args.sample_data_count, int)
+
+
+def test_publish_subcommand_parses():
+    args = cli.build_parser().parse_args(["publish", "--output", "/tmp/out"])
+    assert args.command == "publish"
+    assert str(args.output) == "/tmp/out"

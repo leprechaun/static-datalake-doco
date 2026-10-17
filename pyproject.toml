@@ -5,21 +5,26 @@ description = "Static documentation generator for datalakes"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "typer>=0.12",
     "deltalake>=0.19",
     "polars>=1.0",
     "fsspec>=2024.2",
     "s3fs>=2024.2",
+    "ruff>=0.17.1",
 ]
 
 [project.scripts]
-datalake-doco = "datalake_doco.cli:app"
+datalake-doco = "datalake_doco.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+ignore = [
+    "BLE001", # broad except is intentional: skip one bad table/path rather than aborting the whole run
+]
 
 [build-system]
 requires = ["hatchling"]
