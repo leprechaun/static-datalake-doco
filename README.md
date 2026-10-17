@@ -1,9 +1,21 @@
-# datalake-doco — Backend Specification
+# datalake-doco
 
 [![Maintainability](https://qlty.sh/gh/leprechaun/projects/static-datalake-doco/maintainability.svg)](https://qlty.sh/gh/leprechaun/projects/static-datalake-doco)
 [![Code Coverage](https://qlty.sh/gh/leprechaun/projects/static-datalake-doco/coverage.svg)](https://qlty.sh/gh/leprechaun/projects/static-datalake-doco)
 
 ## Purpose
+
+```
+a.k.a. "Poor Man's Data Catalogue"
+```
+
+This tool will generate a data catalogue after scanning an S3 bucket. The catalogue is a set of OpenMetadata-looking JSON files, and a catalogue. There's also a static HTML page that can be used to view the catalogue as human being.
+
+Why? Because it's easy, quick, and does not require spining up any sort of machinery.
+
+By default, each table documentation will include the schema, row count, version history, sample data, and statistics. Sample data & statistics can both be independently be disabled, on a per-table basis, in case there are cocnerns with data sensitivity.
+
+## Usage
 
 `datalake-doco generate` scans one or more filesystem or S3 roots for Delta Lake tables, profiles each table, and writes a static JSON catalog plus per-table JSON documents to an output directory. The output is self-contained and can be served by any static HTTP server.
 
@@ -289,9 +301,12 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
 
 ---
 
-## Out of scope
+## Missing Features
 
 - Non-Delta table formats (Parquet, Iceberg, Hudi, etc.)
+
+## Out of scope
+
 - Tables with zero columns
 - Incremental / append-only catalog updates
 - S3 credential configuration (delegated to `fsspec`/`s3fs` conventions)
