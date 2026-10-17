@@ -20,6 +20,7 @@ class Column:
     ordinalPosition: int
     precision: int | None = None
     scale: int | None = None
+    partitioned: bool = False
 
 
 @dataclass
@@ -62,6 +63,7 @@ class TableDoc:
     updatedAt: str
     columns: list[Column]
     tableProfile: TableProfile
+    partitionColumns: list[str] = field(default_factory=list)
     sampleData: SampleData | None = None
     extension: dict[str, Any] | None = None
 

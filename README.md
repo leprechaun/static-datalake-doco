@@ -11,7 +11,7 @@
 ```
 URI(s)
   └─ scanner.scan()          → list[(table_uri, table_name)]
-       └─ DeltaReader.read() → TableDoc              (parallel, N workers)
+       └─ DeltaReader.read() → TableDoc
             ├─ profiler.profile() → column statistics
             └─ dt.history()      → Delta transaction log
   └─ writer.write_output()   → catalog.json + tables/**/*.json + frontend assets
@@ -31,7 +31,6 @@ Scans URIs, profiles all discovered Delta tables, and writes the full output.
 | `--output` / `-o` | `Path` | `./datalake-docs` | Output directory |
 | `--sample-data-count` | `int` | `0` | Sample rows per table (`0` = no sample data) |
 | `--sample-data-exclude-tables` | `str` | `""` | Comma-separated `fullyQualifiedName`s to exclude from sample data |
-| `--workers` / `-w` | `int` | `8` | Parallel workers for profiling |
 | `--history-limit` | `int` | `None` | Max history entries per table (`None` = all) |
 
 **Environment:**
@@ -39,7 +38,8 @@ Scans URIs, profiles all discovered Delta tables, and writes the full output.
 
 **Behaviour:**
 - Tables from all URIs are merged into one catalog.
-- Tables that fail to profile are skipped with an error on stderr; they do not appear in the catalog.
+- Tables that fail to profile are skipped, with an `[error]` line printed in place of `done`; they do not appear in the catalog.
+- Tables are profiled sequentially; each progress line is printed as soon as profiling starts and completed in place once it finishes.
 - `--sample-data-exclude-tables` is matched against `fullyQualifiedName` (dots, not slashes). Excluded tables are still profiled and appear in the catalog — only sample rows are omitted.
 - The `tables/` subdirectory in the output is deleted and recreated on each run.
 

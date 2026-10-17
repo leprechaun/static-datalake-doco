@@ -1,134 +1,50 @@
 """
-Tests for the polars dtype → dataType string mapping in DeltaReader.
-Each test writes a single-column Delta table, reads it back, and asserts
-the dataType field in the resulting Column.
+Tests for the polars dtype → dataType string mapping.
+_polars_type is a pure function — no Delta tables or mocking needed.
 """
-from datetime import date, datetime
-from decimal import Decimal
-
-import deltalake
 import polars as pl
 import pytest
 
-from datalake_doco.readers.delta import DeltaReader
-
-
-def _read_col(path: str) -> object:
-    doc = DeltaReader().read(path, "t")
-    return doc.columns[0]
-
-
-# ── Scalar integer types ──────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("dtype,expected", [
-    (pl.Int8,  "TINYINT"),
-    (pl.Int16, "SMALLINT"),
-    (pl.Int32, "INT"),
-    (pl.Int64, "BIGINT"),
-])
-def test_signed_integer_mapping(tmp_path, dtype, expected):
-    df = pl.DataFrame({"col": pl.Series([1, 2, 3], dtype=dtype)})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == expected
+from datalake_doco.readers.delta import _polars_type
 
 
 @pytest.mark.parametrize("dtype,expected", [
-    (pl.UInt8,  "TINYINT"),
-    (pl.UInt16, "SMALLINT"),
-    (pl.UInt32, "INT"),
-    (pl.UInt64, "BIGINT"),
+    (pl.Int8(),   "TINYINT"),
+    (pl.Int16(),  "SMALLINT"),
+    (pl.Int32(),  "INT"),
+    (pl.Int64(),  "BIGINT"),
+    (pl.UInt8(),  "TINYINT"),
+    (pl.UInt16(), "SMALLINT"),
+    (pl.UInt32(), "INT"),
+    (pl.UInt64(), "BIGINT"),
+    (pl.Float32(), "FLOAT"),
+    (pl.Float64(), "DOUBLE"),
+    (pl.Boolean(), "BOOLEAN"),
+    (pl.String(),  "STRING"),
+    (pl.Date(),    "DATE"),
+    (pl.Binary(),  "BINARY"),
+    (pl.Datetime("us"), "TIMESTAMP"),
+    (pl.List(pl.Int64()),         "ARRAY"),
+    (pl.Struct({"a": pl.Int64()}), "STRUCT"),
 ])
-def test_unsigned_integer_mapping(tmp_path, dtype, expected):
-    df = pl.DataFrame({"col": pl.Series([1, 2, 3], dtype=dtype)})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == expected
+def test_type_string(dtype, expected):
+    data_type, _, _ = _polars_type(dtype)
+    assert data_type == expected
 
 
-# ── Float types ───────────────────────────────────────────────────────────────
-
-def test_float32_maps_to_float(tmp_path):
-    df = pl.DataFrame({"col": pl.Series([1.0, 2.0], dtype=pl.Float32)})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == "FLOAT"
+def test_decimal_type_string():
+    data_type, _, _ = _polars_type(pl.Decimal(precision=10, scale=2))
+    assert data_type == "DECIMAL"
 
 
-def test_float64_maps_to_double(tmp_path):
-    df = pl.DataFrame({"col": pl.Series([1.0, 2.0], dtype=pl.Float64)})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == "DOUBLE"
+def test_decimal_carries_precision_and_scale():
+    _, precision, scale = _polars_type(pl.Decimal(precision=10, scale=2))
+    assert precision == 10
+    assert scale == 2
 
 
-# ── Other scalar types ────────────────────────────────────────────────────────
-
-def test_boolean_mapping(tmp_path):
-    df = pl.DataFrame({"col": pl.Series([True, False, True], dtype=pl.Boolean)})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == "BOOLEAN"
-
-
-def test_string_mapping(tmp_path):
-    df = pl.DataFrame({"col": pl.Series(["a", "b"], dtype=pl.String)})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == "STRING"
-
-
-def test_date_mapping(tmp_path):
-    df = pl.DataFrame({"col": pl.Series([date(2024, 1, 1), date(2024, 6, 1)], dtype=pl.Date)})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == "DATE"
-
-
-def test_datetime_maps_to_timestamp(tmp_path):
-    df = pl.DataFrame({"col": pl.Series([datetime(2024, 1, 1), datetime(2024, 6, 1)], dtype=pl.Datetime("us"))})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == "TIMESTAMP"
-
-
-def test_binary_mapping(tmp_path):
-    df = pl.DataFrame({"col": pl.Series([b"hello", b"world"], dtype=pl.Binary)})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == "BINARY"
-
-
-# ── Parametric types ──────────────────────────────────────────────────────────
-
-def test_decimal_maps_to_decimal_with_precision_and_scale(tmp_path):
-    df = pl.DataFrame({"col": pl.Series([Decimal("1.23"), Decimal("4.56")], dtype=pl.Decimal(precision=10, scale=2))})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    col = _read_col(path)
-    assert col.dataType == "DECIMAL"
-    assert col.precision == 10
-    assert col.scale == 2
-
-
-def test_decimal_precision_and_scale_are_none_for_non_decimal(tmp_path):
-    df = pl.DataFrame({"col": pl.Series([1, 2], dtype=pl.Int64)})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    col = _read_col(path)
-    assert col.precision is None
-    assert col.scale is None
-
-
-def test_list_maps_to_array(tmp_path):
-    df = pl.DataFrame({"col": pl.Series([[1, 2], [3, 4]], dtype=pl.List(pl.Int64))})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == "ARRAY"
-
-
-def test_struct_maps_to_struct(tmp_path):
-    df = pl.DataFrame({"col": pl.Series([{"a": 1}, {"a": 2}], dtype=pl.Struct({"a": pl.Int64}))})
-    path = str(tmp_path / "t")
-    deltalake.write_deltalake(path, df)
-    assert _read_col(path).dataType == "STRUCT"
+def test_non_decimal_has_no_precision_or_scale():
+    for dtype in (pl.Int64(), pl.Float64(), pl.String(), pl.Boolean()):
+        _, precision, scale = _polars_type(dtype)
+        assert precision is None
+        assert scale is None

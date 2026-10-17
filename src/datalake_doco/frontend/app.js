@@ -67,9 +67,20 @@ function showOverview(filter = "") {
     return;
   }
 
+  const totalRows = catalog.tables.reduce((s, t) => s + (t.rowCount || 0), 0);
+  const totalCols = catalog.tables.reduce((s, t) => s + (t.columnCount || 0), 0);
+  const generatedAt = catalog.generatedAt ? fmtDateTime(catalog.generatedAt) : "";
+  const summary = [
+    catalog.tables.length.toLocaleString() + " tables",
+    totalRows.toLocaleString() + " rows",
+    totalCols.toLocaleString() + " columns",
+    generatedAt ? "Last refreshed " + generatedAt : "",
+  ].filter(Boolean).join(" · ");
+
   wrap.innerHTML = `
     <div class="index-filter-wrap">
       <input id="index-filter" type="search" placeholder="Filter tables…" autocomplete="off" value="${esc(filter)}">
+      <span class="catalog-generated-at">${summary}</span>
     </div>
     <div class="index-table-wrap">
       <table class="index-table">
@@ -117,19 +128,29 @@ function renderIndexRows(filter) {
 
   const rows = [];
   for (const source of Object.keys(groups).sort()) {
+    const srcEntries = Object.values(groups[source]).flat();
+    const { rows: srcRows, cols: srcCols, maxDate: srcMax } = groupStats(srcEntries);
     rows.push(
       `<tr class="group-source" data-source="${esc(source)}">` +
-      `<td colspan="4"><span class="chevron">▾</span>${esc(source)}</td>` +
+      `<td><span class="chevron">▾</span>${esc(source)}</td>` +
+      `<td class="num-col">${srcRows.toLocaleString()}</td>` +
+      `<td class="num-col">${srcCols.toLocaleString()}</td>` +
+      `<td class="date-col">${srcMax ? fmtDateTime(srcMax) : "—"}</td>` +
       `</tr>`
     );
     for (const layer of Object.keys(groups[source]).sort()) {
+      const lyrEntries = groups[source][layer];
+      const { rows: lyrRows, cols: lyrCols, maxDate: lyrMax } = groupStats(lyrEntries);
       rows.push(
         `<tr class="group-layer" data-source="${esc(source)}" data-layer="${esc(layer)}">` +
-        `<td colspan="4"><span class="chevron">▾</span>${esc(layer)}</td>` +
+        `<td><span class="chevron">▾</span>${esc(layer)}</td>` +
+        `<td class="num-col">${lyrRows.toLocaleString()}</td>` +
+        `<td class="num-col">${lyrCols.toLocaleString()}</td>` +
+        `<td class="date-col">${lyrMax ? fmtDateTime(lyrMax) : "—"}</td>` +
         `</tr>`
       );
-      for (const { entry, leaf } of groups[source][layer]) {
-        const date = entry.updatedAt ? entry.updatedAt.slice(0, 10) : "—";
+      for (const { entry, leaf } of lyrEntries) {
+        const date = entry.updatedAt ? fmtDateTime(entry.updatedAt) : "—";
         rows.push(
           `<tr class="index-row" data-source="${esc(source)}" data-layer="${esc(layer)}" data-name="${esc(entry.fullyQualifiedName)}">` +
           `<td class="table-leaf">${esc(leaf)}</td>` +
@@ -398,6 +419,22 @@ function esc(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function groupStats(entries) {
+  let rows = 0, cols = 0, maxDate = "";
+  for (const { entry } of entries) {
+    rows += entry.rowCount || 0;
+    cols += entry.columnCount || 0;
+    if (entry.updatedAt && entry.updatedAt > maxDate) maxDate = entry.updatedAt;
+  }
+  return { rows, cols, maxDate };
+}
+
+function fmtDateTime(iso) {
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function fmt(n) {

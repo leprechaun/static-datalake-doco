@@ -1,52 +1,42 @@
-import multiprocessing
 import os
-
-# Use spawn instead of fork so child processes start with a clean Rust/Rayon
-# runtime. Fork inherits an already-initialised thread pool from the parent,
-# which deadlocks or corrupts state in polars/deltalake workers.
-multiprocessing.set_start_method("spawn", force=True)
+from unittest.mock import MagicMock
 
 # Cap polars and rayon thread pools to 1 so tests don't compete for cores.
 os.environ.setdefault("POLARS_MAX_THREADS", "1")
 os.environ.setdefault("RAYON_NUM_THREADS", "1")
 
-import deltalake
-import polars as pl
-import pytest
+FIXED_TS = "2026-01-01T00:00:00+00:00"
+
+DEFAULT_HISTORY = [
+    {
+        "version": 0,
+        "timestamp": 1704067200000,
+        "operation": "WRITE",
+        "operationParameters": {"mode": "Overwrite"},
+    }
+]
 
 
-@pytest.fixture
-def numeric_table(tmp_path):
-    """Delta table with two numeric columns, 5 rows, no nulls."""
-    df = pl.DataFrame({
-        "id": pl.Series([1, 2, 3, 4, 5], dtype=pl.Int64),
-        "value": pl.Series([10.0, 20.0, 30.0, 40.0, 50.0], dtype=pl.Float64),
-    })
-    path = str(tmp_path / "numeric")
-    deltalake.write_deltalake(path, df)
-    return path
+def make_field(name, nullable=True):
+    """Build a mock DeltaTable schema field."""
+    f = MagicMock()
+    f.name = name
+    f.nullable = nullable
+    return f
 
 
-@pytest.fixture
-def mixed_table(tmp_path):
-    """Delta table with numeric and string columns."""
-    df = pl.DataFrame({
-        "id": pl.Series([1, 2, 3], dtype=pl.Int32),
-        "name": pl.Series(["alice", "bob", "alice"], dtype=pl.String),
-        "score": pl.Series([1.5, 2.5, 3.5], dtype=pl.Float64),
-    })
-    path = str(tmp_path / "mixed")
-    deltalake.write_deltalake(path, df)
-    return path
+def make_mock_dt(fields, partition_columns=None, history=None):
+    """Build a mock DeltaTable with sensible defaults."""
+    dt = MagicMock()
 
+    schema = MagicMock()
+    schema.fields = fields
+    dt.schema.return_value = schema
 
-@pytest.fixture
-def nullable_table(tmp_path):
-    """Delta table where every column has at least one null."""
-    df = pl.DataFrame({
-        "x": pl.Series([1.0, None, 3.0], dtype=pl.Float64),
-        "label": pl.Series(["a", None, "a"], dtype=pl.String),
-    })
-    path = str(tmp_path / "nullable")
-    deltalake.write_deltalake(path, df)
-    return path
+    metadata = MagicMock()
+    metadata.partition_columns = partition_columns if partition_columns is not None else []
+    dt.metadata.return_value = metadata
+
+    dt.history.return_value = history if history is not None else DEFAULT_HISTORY
+
+    return dt

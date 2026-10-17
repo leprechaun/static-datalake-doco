@@ -72,15 +72,18 @@ class DeltaReader:
         dt = deltalake.DeltaTable(uri, storage_options=storage_options)
         history = _parse_history(dt.history(limit=history_limit))
 
-        df = pl.read_delta(uri, storage_options=storage_options)
+        lf = pl.scan_delta(uri, storage_options=storage_options)
+        schema = lf.collect_schema()
 
         timestamp = datetime.now(timezone.utc).isoformat()
 
         delta_schema = dt.schema()
         nullable_by_name = {f.name: f.nullable for f in delta_schema.fields}
+        partition_columns = dt.metadata().partition_columns
+        partitioned_set = set(partition_columns)
 
         columns = []
-        for pos, (col, dtype) in enumerate(df.schema.items(), start=1):
+        for pos, (col, dtype) in enumerate(schema.items(), start=1):
             data_type, precision, scale = _polars_type(dtype)
             columns.append(Column(
                 name=col,
@@ -89,9 +92,12 @@ class DeltaReader:
                 ordinalPosition=pos,
                 precision=precision,
                 scale=scale,
+                partitioned=col in partitioned_set,
             ))
 
-        raw_stats = profile(df)
+        row_count = lf.select(pl.len()).collect(engine="streaming").item()
+
+        raw_stats = profile(lf, schema)
         column_profiles = []
         for col, s in raw_stats.items():
             column_profiles.append(ColumnProfile(
@@ -113,7 +119,7 @@ class DeltaReader:
 
         table_profile = TableProfile(
             timestamp=timestamp,
-            rowCount=df.height,
+            rowCount=row_count,
             columnCount=len(columns),
             columnProfile=column_profiles,
         )
@@ -122,7 +128,7 @@ class DeltaReader:
         if sample_count > 0:
             col_names = [c.name for c in columns]
             rows = []
-            for row in df.head(sample_count).to_dicts():
+            for row in lf.limit(sample_count).collect(engine="streaming").to_dicts():
                 clean = []
                 for k in col_names:
                     v = row[k]
@@ -146,6 +152,7 @@ class DeltaReader:
             updatedAt=timestamp,
             columns=columns,
             tableProfile=table_profile,
+            partitionColumns=partition_columns,
             sampleData=sample_data,
             extension={"deltaHistory": history} if history else None,
         )

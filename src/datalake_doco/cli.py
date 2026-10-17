@@ -1,27 +1,17 @@
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
 
-from datalake_doco.models import Catalog, CatalogEntry
+from datalake_doco.models import Catalog, CatalogEntry, TableDoc
 from datalake_doco.readers.delta import DeltaReader
 from datalake_doco.scanner import scan
-from datalake_doco.writer import copy_frontend, write_output
+from datalake_doco.writer import copy_frontend, init_output_dir, write_catalog, write_table_doc
 
 app = typer.Typer(help="Generate static documentation for a datalake.")
-
-
-def _profile_table(
-    table_uri: str,
-    table_name: str,
-    sample_count: int,
-    storage_options: dict | None,
-    history_limit: int | None,
-) -> tuple:
-    doc = DeltaReader().read(table_uri, table_name, sample_count=sample_count, storage_options=storage_options, history_limit=history_limit)
-    return doc, table_name, table_uri
 
 
 @app.command()
@@ -30,7 +20,6 @@ def generate(
     output: Path = typer.Option(Path("./datalake-docs"), "--output", "-o", help="Output directory."),
     sample_data_count: int = typer.Option(0, "--sample-data-count", help="Number of sample rows to include per table."),
     sample_data_exclude_tables: str = typer.Option("", "--sample-data-exclude-tables", help="Comma-separated table names to exclude from sample data."),
-    workers: int = typer.Option(8, "--workers", "-w", help="Number of parallel workers for profiling tables."),
     history_limit: int = typer.Option(None, "--history-limit", help="Max number of history entries to include per table (default: unlimited)."),
 ) -> None:
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -47,60 +36,58 @@ def generate(
         typer.echo(f"  Found {len(discovered)} table(s)")
         all_discovered.extend(discovered)
 
+    total = len(all_discovered)
+    init_output_dir(output)
+    copy_frontend(output)
+    write_catalog(Catalog(generatedAt=generated_at, sources=uris, tables=[]), output)
+
     table_docs = []
     catalog_entries = []
 
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(
-                _profile_table,
-                table_uri,
-                table_name,
-                0 if table_name.replace("/", ".") in excluded else sample_data_count,
-                storage_options,
-                history_limit,
-            ): (table_uri, table_name)
-            for table_uri, table_name in all_discovered
-        }
+    def record(table_uri: str, doc: TableDoc) -> None:
+        table_docs.append(doc)
+        write_table_doc(output, doc)
 
-        for future in as_completed(futures):
-            table_uri, table_name = futures[future]
-            try:
-                doc, _, _ = future.result()
-            except Exception as exc:
-                typer.echo(f"  [error] {table_name}: {exc}", err=True)
-                continue
-
-            if doc is None:
-                typer.echo(f"  [skip] No reader for {table_uri}", err=True)
-                continue
-
-            typer.echo(f"  Profiled {doc.fullyQualifiedName}")
-            table_docs.append(doc)
-
-            doc_path = f"tables/{doc.fullyQualifiedName.replace('.', '/')}.json"
-            catalog_entries.append(
-                CatalogEntry(
-                    fullyQualifiedName=doc.fullyQualifiedName,
-                    name=doc.name,
-                    uri=table_uri,
-                    docPath=doc_path,
-                    updatedAt=doc.updatedAt,
-                    rowCount=doc.tableProfile.rowCount,
-                    columnCount=doc.tableProfile.columnCount,
-                )
+        doc_path = f"tables/{doc.fullyQualifiedName.replace('.', '/')}.json"
+        catalog_entries.append(
+            CatalogEntry(
+                fullyQualifiedName=doc.fullyQualifiedName,
+                name=doc.name,
+                uri=table_uri,
+                docPath=doc_path,
+                updatedAt=doc.updatedAt,
+                rowCount=doc.tableProfile.rowCount,
+                columnCount=doc.tableProfile.columnCount,
             )
+        )
 
-    table_docs.sort(key=lambda d: d.fullyQualifiedName)
-    catalog_entries.sort(key=lambda e: e.fullyQualifiedName)
+        catalog = Catalog(
+            generatedAt=generated_at,
+            sources=uris,
+            tables=sorted(catalog_entries, key=lambda e: e.fullyQualifiedName),
+        )
+        write_catalog(catalog, output)
 
-    catalog = Catalog(
-        generatedAt=generated_at,
-        sources=uris,
-        tables=catalog_entries,
-    )
+    for idx, (table_uri, table_name) in enumerate(all_discovered, start=1):
+        fqn = table_name.replace("/", ".")
+        sample_count = 0 if fqn in excluded else sample_data_count
 
-    write_output(catalog, table_docs, output)
+        sys.stdout.write(f"  [{idx}/{total}] {fqn} ... ")
+        sys.stdout.flush()
+        start = time.monotonic()
+
+        try:
+            doc = DeltaReader().read(table_uri, table_name, sample_count=sample_count, storage_options=storage_options, history_limit=history_limit)
+        except Exception as exc:
+            elapsed = time.monotonic() - start
+            sys.stdout.write(f"[error] ({elapsed:.1f}s): {exc}\n")
+            sys.stdout.flush()
+            continue
+
+        elapsed = time.monotonic() - start
+        sys.stdout.write(f"done ({elapsed:.1f}s)\n")
+        sys.stdout.flush()
+        record(table_uri, doc)
 
     typer.echo(f"\nDone. {len(table_docs)} table(s) documented → {output}")
     typer.echo(f"Serve with: python -m http.server 8000 --directory {output}")
