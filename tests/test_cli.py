@@ -37,6 +37,7 @@ def _fake_doc(name, uri, sample_count=0):
         tableProfile=TableProfile(
             timestamp=FIXED_TS, rowCount=3, columnCount=1, columnProfile=[profile]
         ),
+        description=f"{name} description",
         partitionColumns=[],
         sampleData=sample,
     )
@@ -94,6 +95,30 @@ def test_generate_creates_catalog_and_table_doc(tmp_path):
     _invoke("generate", str(tmp_path), "--output", str(out))
     assert (out / "catalog.json").exists()
     assert (out / "tables" / "events.json").exists()
+
+
+def test_catalog_entry_includes_table_description(tmp_path):
+    _make_table(tmp_path / "events")
+    out = tmp_path / "out"
+    _invoke("generate", str(tmp_path), "--output", str(out))
+    catalog = json.loads((out / "catalog.json").read_text())
+    assert catalog["tables"][0]["description"] == "events description"
+
+
+def test_generate_writes_llm_docs(tmp_path):
+    _make_table(tmp_path / "src" / "bronze" / "events")
+    _make_table(tmp_path / "src" / "bronze" / "clicks")
+    out = tmp_path / "out"
+    _invoke("generate", str(tmp_path), "--output", str(out))
+    assert "(tables/src/bronze/events.md)" in (out / "llms.txt").read_text()
+    assert "(clicks.md)" in (out / "tables" / "src" / "bronze" / "events.md").read_text()
+
+
+def test_generate_base_url_makes_links_absolute(tmp_path):
+    _make_table(tmp_path / "events")
+    out = tmp_path / "out"
+    _invoke("generate", str(tmp_path), "--output", str(out), "--base-url", "https://docs.example/")
+    assert "(https://docs.example/tables/events.md)" in (out / "llms.txt").read_text()
 
 
 # ── Multi-URI merge ───────────────────────────────────────────────────────────
@@ -201,6 +226,7 @@ def test_generate_defaults():
     assert args.sample_data_count == 0
     assert args.sample_data_exclude_tables == ""
     assert args.history_limit is None
+    assert args.base_url is None
 
 
 def test_generate_accepts_multiple_positional_uris():

@@ -30,6 +30,7 @@ URI(s)
             ├─ profiler.profile() → column statistics
             └─ dt.history()      → Delta transaction log
   └─ writer.write_output()   → catalog.json + tables/**/*.json + frontend assets
+  └─ writer.write_llm_docs() → llms.txt + tables/**/*.md
 ```
 
 ---
@@ -47,6 +48,7 @@ Scans URIs, profiles all discovered Delta tables, and writes the full output.
 | `--sample-data-count` | `int` | `0` | Sample rows per table (`0` = no sample data) |
 | `--sample-data-exclude-tables` | `str` | `""` | Comma-separated `fullyQualifiedName`s to exclude from sample data |
 | `--history-limit` | `int` | `None` | Max history entries per table (`None` = all) |
+| `--base-url` | `str` | `None` | Public URL of the output directory. Makes links in `llms.txt` and the table Markdown absolute (`None` = relative links) |
 
 **Environment:**
 - `AWS_ENDPOINT_URL_S3` — if set, used as the S3 endpoint for both scanning and reading. Enables MinIO and other S3-compatible stores.
@@ -103,6 +105,10 @@ Trailing slashes in `uri` are stripped before processing.
 | `mydb/bronze/events` | `events` | `mydb.bronze.events` |
 
 Rule: `name` = last `/`-segment; `fullyQualifiedName` = `name` with `/` replaced by `.`.
+
+### Description
+
+`description` ← the Delta table's metadata description (`DeltaTable.metadata().description`). `None` if absent or empty.
 
 ### Column schema
 
@@ -231,7 +237,8 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
       "docPath": "tables/mydb/bronze/events.json",
       "updatedAt": "<ISO 8601 UTC>",
       "rowCount": 1000000,
-      "columnCount": 12
+      "columnCount": 12,
+      "description": "Raw clickstream events"
     }
   ]
 }
@@ -245,6 +252,7 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
   "fullyQualifiedName": "mydb.bronze.events",
   "uri": "<absolute table URI>",
   "updatedAt": "<ISO 8601 UTC>",
+  "description": "Raw clickstream events",
   "columns": [
     {
       "name": "id",
@@ -297,7 +305,18 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
 }
 ```
 
-`sampleData` is `null` when `--sample-data-count` is `0` or the table is excluded. `extension` is `null` when the Delta table has no history.
+`description` is `null` when the Delta table has no description. `sampleData` is `null` when `--sample-data-count` is `0` or the table is excluded. `extension` is `null` when the Delta table has no history.
+
+---
+
+### LLM docs (`llms.txt` + `tables/{path}.md`)
+
+Written at the end of `generate`, next to the JSON, so the same static server exposes them. Point an agent with a fetch tool at `<server>/llms.txt` and it can follow the links to each table.
+
+- `llms.txt` — one section per group (the fully qualified name minus the table name, e.g. `gadgetbridge.gold`), one linked line per table with its description, row and column counts.
+- `tables/{path}.md` — description, row/column counts, partition columns, location, schema, statistics (nulls, distinct, min, mean, max, most common), sample rows, the last 5 history entries, and links to the other tables in the same group, to the table's JSON and back to `llms.txt`.
+
+Links are relative to the file they appear in, unless `--base-url` is given. Use `--base-url` when the files will be pasted into a chat rather than fetched, so the links still resolve. If the docs are published where a cloud-hosted LLM can reach them, consider generating without `--sample-data-count`.
 
 ---
 

@@ -172,12 +172,21 @@ body {
 }
 
 .index-row td.table-leaf { padding-left: 52px; }
+.table-description {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .index-row:last-child td { border-bottom: none; }
 .index-row:hover td { background: #e7f0ff; }
 
-.index-table .num-col { text-align: right; }
-.index-table .date-col { color: var(--muted); font-size: 12px; }
+.index-table .num-col { text-align: right; white-space: nowrap; }
+.index-table .date-col { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
 .badge {
   display: inline-block;
@@ -204,6 +213,12 @@ body {
   font-size: 20px;
   font-weight: 700;
   margin-bottom: 8px;
+}
+
+.detail-description {
+  color: var(--text);
+  margin-bottom: 10px;
+  white-space: pre-wrap;
 }
 
 .detail-meta {

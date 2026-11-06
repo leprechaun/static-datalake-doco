@@ -112,7 +112,9 @@ function showOverview(filter = "") {
 function renderIndexRows(filter) {
   const lower = (filter || "").toLowerCase();
   const tables = lower
-    ? catalog.tables.filter(t => t.fullyQualifiedName.toLowerCase().includes(lower))
+    ? catalog.tables.filter(t =>
+        t.fullyQualifiedName.toLowerCase().includes(lower) ||
+        (t.description || "").toLowerCase().includes(lower))
     : catalog.tables;
 
   const groups = {};
@@ -153,7 +155,7 @@ function renderIndexRows(filter) {
         const date = entry.updatedAt ? fmtDateTime(entry.updatedAt) : "—";
         rows.push(
           `<tr class="index-row" data-source="${esc(source)}" data-layer="${esc(layer)}" data-name="${esc(entry.fullyQualifiedName)}">` +
-          `<td class="table-leaf">${esc(leaf)}</td>` +
+          `<td class="table-leaf">${esc(leaf)}${entry.description ? `<div class="table-description" title="${esc(entry.description)}">${esc(entry.description)}</div>` : ""}</td>` +
           `<td class="num-col">${entry.rowCount.toLocaleString()}</td>` +
           `<td class="num-col">${entry.columnCount}</td>` +
           `<td class="date-col">${esc(date)}</td>` +
@@ -245,6 +247,7 @@ function renderDetail(doc) {
   return `
     <div class="detail-header">
       <div class="detail-title">${doc.fullyQualifiedName ?? doc.name}</div>
+      ${doc.description ? `<div class="detail-description">${esc(doc.description)}</div>` : ""}
       <div class="detail-meta">
         ${rowCount != null ? `<span>${rowCount.toLocaleString()} rows</span>` : ""}
         <span>${colCount} columns</span>

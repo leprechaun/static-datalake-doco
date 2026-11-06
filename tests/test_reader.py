@@ -9,12 +9,13 @@ from datalake_doco.readers.delta import DeltaReader
 
 
 @contextmanager
-def _read_ctx(df, fields=None, partition_columns=None, history=None):
+def _read_ctx(df, fields=None, partition_columns=None, history=None, description=None):
     """Patch DeltaTable and pl.read_delta for the duration of the with block."""
     mock_dt = make_mock_dt(
         fields if fields is not None else [make_field(c) for c in df.columns],
         partition_columns=partition_columns,
         history=history,
+        description=description,
     )
     with patch("datalake_doco.readers.delta.deltalake.DeltaTable", return_value=mock_dt), \
          patch("datalake_doco.readers.delta.pl.scan_delta", return_value=df.lazy()):
@@ -51,6 +52,21 @@ def test_updated_at_is_set():
     with _read_ctx(df):
         doc = DeltaReader().read("/fake/path", "t")
     assert doc.updatedAt
+
+
+def test_description_read_from_delta_metadata():
+    df = pl.DataFrame({"id": pl.Series([1], dtype=pl.Int64)})
+    with _read_ctx(df, description="Nightly sleep scores"):
+        doc = DeltaReader().read("/fake/path", "t")
+    assert doc.description == "Nightly sleep scores"
+
+
+@pytest.mark.parametrize("description", [None, ""])
+def test_description_is_none_when_absent(description):
+    df = pl.DataFrame({"id": pl.Series([1], dtype=pl.Int64)})
+    with _read_ctx(df, description=description):
+        doc = DeltaReader().read("/fake/path", "t")
+    assert doc.description is None
 
 
 # ── Column schema ─────────────────────────────────────────────────────────────

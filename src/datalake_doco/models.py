@@ -63,6 +63,7 @@ class TableDoc:
     updatedAt: str
     columns: list[Column]
     tableProfile: TableProfile
+    description: str | None = None
     partitionColumns: list[str] = field(default_factory=list)
     sampleData: SampleData | None = None
     extension: dict[str, Any] | None = None
@@ -77,6 +78,7 @@ class CatalogEntry:
     updatedAt: str
     rowCount: int
     columnCount: int
+    description: str | None = None
 
 
 @dataclass

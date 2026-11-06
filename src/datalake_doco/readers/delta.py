@@ -86,7 +86,8 @@ class DeltaReader:
 
         delta_schema = dt.schema()
         nullable_by_name = {f.name: f.nullable for f in delta_schema.fields}
-        partition_columns = dt.metadata().partition_columns
+        metadata = dt.metadata()
+        partition_columns = metadata.partition_columns
         partitioned_set = set(partition_columns)
 
         columns = []
@@ -159,6 +160,7 @@ class DeltaReader:
             updatedAt=timestamp,
             columns=columns,
             tableProfile=table_profile,
+            description=metadata.description or None,
             partitionColumns=partition_columns,
             sampleData=sample_data,
             extension={"deltaHistory": history} if history else None,

@@ -12,6 +12,7 @@ from datalake_doco.writer import (
     copy_frontend,
     init_output_dir,
     write_catalog,
+    write_llm_docs,
     write_table_doc,
 )
 
@@ -22,6 +23,7 @@ def generate(
     sample_data_count: int,
     sample_data_exclude_tables: str,
     history_limit: int | None,
+    base_url: str | None = None,
 ) -> None:
     generated_at = datetime.now(UTC).isoformat()
 
@@ -59,15 +61,18 @@ def generate(
                 updatedAt=doc.updatedAt,
                 rowCount=doc.tableProfile.rowCount,
                 columnCount=doc.tableProfile.columnCount,
+                description=doc.description,
             )
         )
 
-        catalog = Catalog(
+        write_catalog(build_catalog(), output)
+
+    def build_catalog() -> Catalog:
+        return Catalog(
             generatedAt=generated_at,
             sources=uris,
             tables=sorted(catalog_entries, key=lambda e: e.fullyQualifiedName),
         )
-        write_catalog(catalog, output)
 
     for idx, (table_uri, table_name) in enumerate(all_discovered, start=1):
         fqn = table_name.replace("/", ".")
@@ -89,6 +94,8 @@ def generate(
         sys.stdout.write(f"done ({elapsed:.1f}s)\n")
         sys.stdout.flush()
         record(table_uri, doc)
+
+    write_llm_docs(build_catalog(), table_docs, output, base_url)
 
     print(f"\nDone. {len(table_docs)} table(s) documented → {output}")
     print(f"Serve with: python -m http.server 8000 --directory {output}")
@@ -114,8 +121,9 @@ def build_parser() -> argparse.ArgumentParser:
     generate_parser.add_argument("--sample-data-count", type=int, default=0, help="Number of sample rows to include per table.")
     generate_parser.add_argument("--sample-data-exclude-tables", default="", help="Comma-separated table names to exclude from sample data.")
     generate_parser.add_argument("--history-limit", type=int, default=None, help="Max number of history entries to include per table (default: unlimited).")
+    generate_parser.add_argument("--base-url", default=None, help="Public URL of the output directory; makes links in llms.txt and table Markdown absolute.")
     generate_parser.set_defaults(func=lambda args: generate(
-        args.uris, args.output, args.sample_data_count, args.sample_data_exclude_tables, args.history_limit,
+        args.uris, args.output, args.sample_data_count, args.sample_data_exclude_tables, args.history_limit, args.base_url,
     ))
 
     publish_parser = subparsers.add_parser("publish", help="Copy frontend assets without re-profiling tables.")
