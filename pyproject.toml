@@ -3,6 +3,8 @@ name = "datalake-doco"
 version = "0.1.0"
 description = "Static documentation generator for datalakes"
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.13"
 dependencies = [
     "deltalake>=0.19",
@@ -35,8 +37,8 @@ ignore = [
 ]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "README.md"]
+include = ["src", "tests", "README.md", "LICENSE"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]  # 1.27 adds the SPDX `license` field
 build-backend = "hatchling.build"
