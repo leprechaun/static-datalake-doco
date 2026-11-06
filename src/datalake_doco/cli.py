@@ -5,6 +5,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from datalake_doco.config import DEFAULT_HISTORY_LIMIT, OPEN_FILE_LIMIT
 from datalake_doco.models import Catalog, CatalogEntry, TableDoc
 from datalake_doco.readers.delta import DeltaReader
 from datalake_doco.scanner import scan
@@ -62,6 +63,7 @@ def generate(
                 rowCount=doc.tableProfile.rowCount,
                 columnCount=doc.tableProfile.columnCount,
                 description=doc.description,
+                freshness=doc.freshness,
             )
         )
 
@@ -120,10 +122,13 @@ def build_parser() -> argparse.ArgumentParser:
     generate_parser.add_argument("--output", "-o", type=Path, default=Path("./datalake-docs"), help="Output directory.")
     generate_parser.add_argument("--sample-data-count", type=int, default=0, help="Number of sample rows to include per table.")
     generate_parser.add_argument("--sample-data-exclude-tables", default="", help="Comma-separated table names to exclude from sample data.")
-    generate_parser.add_argument("--history-limit", type=int, default=None, help="Max number of history entries to include per table (default: unlimited).")
+    generate_parser.add_argument(
+        "--history-limit", type=int, default=DEFAULT_HISTORY_LIMIT,
+        help=f"Max number of history entries to read per table; 0 reads all of them (default: {DEFAULT_HISTORY_LIMIT}).",
+    )
     generate_parser.add_argument("--base-url", default=None, help="Public URL of the output directory; makes links in llms.txt and table Markdown absolute.")
     generate_parser.set_defaults(func=lambda args: generate(
-        args.uris, args.output, args.sample_data_count, args.sample_data_exclude_tables, args.history_limit, args.base_url,
+        args.uris, args.output, args.sample_data_count, args.sample_data_exclude_tables, args.history_limit or None, args.base_url,
     ))
 
     publish_parser = subparsers.add_parser("publish", help="Copy frontend assets without re-profiling tables.")
@@ -133,7 +138,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def raise_open_file_limit(target: int = OPEN_FILE_LIMIT) -> None:
+    """Raise the soft open-file limit towards `target`, capped at the hard limit.
+
+    Reading S3-backed tables opens many connections in parallel, and the storage clients keep
+    them pooled, so the common default soft limit of 1024 can run out mid-run.
+    """
+    try:
+        import resource
+    except ImportError:  # not available on Windows
+        return
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    wanted = target if hard == resource.RLIM_INFINITY else min(target, hard)
+    if soft != resource.RLIM_INFINITY and soft < wanted:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (wanted, hard))
+
+
 def main(argv: list[str] | None = None) -> None:
+    raise_open_file_limit()
     parser = build_parser()
     args = parser.parse_args(argv)
     args.func(args)

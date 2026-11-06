@@ -225,8 +225,16 @@ def test_generate_defaults():
     assert args.output == Path("./datalake-docs")
     assert args.sample_data_count == 0
     assert args.sample_data_exclude_tables == ""
-    assert args.history_limit is None
+    assert args.history_limit == 100
     assert args.base_url is None
+
+
+def test_history_limit_zero_reads_all_history(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(cli, "generate", lambda *a: captured.setdefault("history_limit", a[4]))
+    args = cli.build_parser().parse_args(["generate", "some-uri", "--history-limit", "0"])
+    args.func(args)
+    assert captured["history_limit"] is None
 
 
 def test_generate_accepts_multiple_positional_uris():
@@ -251,3 +259,31 @@ def test_publish_subcommand_parses():
     args = cli.build_parser().parse_args(["publish", "--output", "/tmp/out"])
     assert args.command == "publish"
     assert str(args.output) == "/tmp/out"
+
+
+# ── Open file limit ───────────────────────────────────────────────────────────
+
+def _fake_rlimit(monkeypatch, soft, hard):
+    import resource
+    calls = []
+    monkeypatch.setattr(resource, "getrlimit", lambda _: (soft, hard))
+    monkeypatch.setattr(resource, "setrlimit", lambda _, limits: calls.append(limits))
+    return calls
+
+
+def test_open_file_limit_raised_to_target(monkeypatch):
+    calls = _fake_rlimit(monkeypatch, 1024, 524288)
+    cli.raise_open_file_limit(65536)
+    assert calls == [(65536, 524288)]
+
+
+def test_open_file_limit_capped_at_hard_limit(monkeypatch):
+    calls = _fake_rlimit(monkeypatch, 1024, 4096)
+    cli.raise_open_file_limit(65536)
+    assert calls == [(4096, 4096)]
+
+
+def test_open_file_limit_never_lowered(monkeypatch):
+    calls = _fake_rlimit(monkeypatch, 100000, 524288)
+    cli.raise_open_file_limit(65536)
+    assert calls == []

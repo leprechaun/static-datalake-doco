@@ -9,13 +9,14 @@ from datalake_doco.readers.delta import DeltaReader
 
 
 @contextmanager
-def _read_ctx(df, fields=None, partition_columns=None, history=None, description=None):
+def _read_ctx(df, fields=None, partition_columns=None, history=None, description=None, version=0):
     """Patch DeltaTable and pl.read_delta for the duration of the with block."""
     mock_dt = make_mock_dt(
         fields if fields is not None else [make_field(c) for c in df.columns],
         partition_columns=partition_columns,
         history=history,
         description=description,
+        version=version,
     )
     with patch("datalake_doco.readers.delta.deltalake.DeltaTable", return_value=mock_dt), \
          patch("datalake_doco.readers.delta.pl.scan_delta", return_value=df.lazy()):
@@ -207,6 +208,14 @@ def test_history_limit():
         doc_limited = DeltaReader().read("/fake/path", "t", history_limit=1)
     assert len(doc_full.extension["deltaHistory"]) == 2
     assert len(doc_limited.extension["deltaHistory"]) == 1
+
+
+def test_commit_count_is_latest_version_plus_one_regardless_of_history_read():
+    df = pl.DataFrame({"x": pl.Series([1], dtype=pl.Int64)})
+    with _read_ctx(df, version=84141):
+        doc = DeltaReader().read("/fake/path", "t", history_limit=1)
+    assert doc.commitCount == 84142
+    assert len(doc.extension["deltaHistory"]) == 1
 
 
 def test_extension_is_none_when_history_empty():

@@ -25,7 +25,7 @@ def make_field(name, nullable=True):
     return f
 
 
-def make_mock_dt(fields, partition_columns=None, history=None, description=None):
+def make_mock_dt(fields, partition_columns=None, history=None, description=None, version=0):
     """Build a mock DeltaTable with sensible defaults."""
     dt = MagicMock()
 
@@ -39,5 +39,6 @@ def make_mock_dt(fields, partition_columns=None, history=None, description=None)
     dt.metadata.return_value = metadata
 
     dt.history.return_value = history if history is not None else DEFAULT_HISTORY
+    dt.version.return_value = version
 
     return dt

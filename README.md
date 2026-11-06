@@ -16,9 +16,9 @@ a.k.a. "Poor Man's Data Catalogue"
 
 This tool will generate a data catalogue after scanning an S3 bucket. The catalogue is a set of OpenMetadata-looking JSON files, and a catalogue. There's also a static HTML page that can be used to view the catalogue as human being.
 
-Why? Because it's easy, quick, and does not require spining up any sort of machinery.
+Why? Because it's easy, quick, and does not require spinning up any sort of machinery.
 
-By default, each table documentation will include the schema, row count, version history, sample data, and statistics. Sample data & statistics can both be independently be disabled, on a per-table basis, in case there are cocnerns with data sensitivity.
+Each table's documentation includes the schema, row count, version history, statistics, and a time distribution for each date/timestamp column. Sample data is off by default; turn it on with `--sample-data-count`, and leave out individual tables with `--sample-data-exclude-tables` in case there are concerns with data sensitivity.
 
 ## Usage
 
@@ -30,12 +30,15 @@ By default, each table documentation will include the schema, row count, version
 
 ```
 URI(s)
-  └─ scanner.scan()          → list[(table_uri, table_name)]
-       └─ DeltaReader.read() → TableDoc
-            ├─ profiler.profile() → column statistics
-            └─ dt.history()      → Delta transaction log
-  └─ writer.write_output()   → catalog.json + tables/**/*.json + frontend assets
-  └─ writer.write_llm_docs() → llms.txt + tables/**/*.md
+  └─ scanner.scan()             → list[(table_uri, table_name)]
+  └─ writer.init_output_dir() + copy_frontend()
+  └─ per table:
+       └─ DeltaReader.read()    → TableDoc
+            ├─ profiler.profile()     → column statistics + time distributions
+            ├─ dt.history()           → Delta transaction log
+            └─ freshness.freshness()  → last write vs typical write interval
+       └─ writer.write_table_doc() + write_catalog() → tables/**/*.json, catalog.json
+  └─ writer.write_llm_docs()    → llms.txt + tables/**/*.md
 ```
 
 ---
@@ -52,7 +55,7 @@ Scans URIs, profiles all discovered Delta tables, and writes the full output.
 | `--output` / `-o` | `Path` | `./datalake-docs` | Output directory |
 | `--sample-data-count` | `int` | `0` | Sample rows per table (`0` = no sample data) |
 | `--sample-data-exclude-tables` | `str` | `""` | Comma-separated `fullyQualifiedName`s to exclude from sample data |
-| `--history-limit` | `int` | `None` | Max history entries per table (`None` = all) |
+| `--history-limit` | `int` | `100` | Max history entries read per table (`0` = all). Each entry is a separate commit file fetched from storage, so busy tables with thousands of commits make many requests |
 | `--base-url` | `str` | `None` | Public URL of the output directory. Makes links in `llms.txt` and the table Markdown absolute (`None` = relative links) |
 
 **Environment:**
@@ -124,6 +127,7 @@ Each column in the polars schema produces one `Column`:
 - `nullable` — from the Delta schema field, **not** inferred from data
 - `ordinalPosition` — 1-indexed position in the schema
 - `precision`, `scale` — set only for `DECIMAL`; `None` otherwise
+- `partitioned` — whether the column is one of the Delta table's partition columns (also listed in `TableDoc.partitionColumns`)
 
 **Type mapping:**
 
@@ -147,7 +151,7 @@ Each column in the polars schema produces one `Column`:
 
 ### Table profile
 
-- `rowCount` — total rows in the table (`df.height`)
+- `rowCount` — total rows in the table (a streaming `pl.len()` over the scan)
 - `columnCount` — number of columns in the schema
 - `timestamp` — ISO 8601 UTC timestamp at the moment of profiling
 - `columnProfile` — one `ColumnProfile` per column
@@ -163,20 +167,32 @@ Produced only when `sample_count > 0`.
 ### Delta history
 
 - Stored under `extension["deltaHistory"]` as a list of `HistoryEntry`.
-- Limited to the `history_limit` most-recent entries when set; all entries otherwise.
+- Limited to the `history_limit` most-recent entries when set (the CLI defaults to 100, `config.DEFAULT_HISTORY_LIMIT`); all entries otherwise. Freshness is computed from these entries, so a limit below about 100 shortens the window for the typical write interval.
 - `timestamp` is converted from epoch-milliseconds to ISO 8601 UTC string; stored as `""` if absent.
 - `parameters` ← `operationParameters` (empty dict if absent).
 - `description` ← `userMetadata` (`None` if absent/empty).
 - `engine_info` ← `engineInfo` (`None` if absent/empty).
 - If the history list is empty, `extension` is `None`.
+- `commitCount` (top level, not under `extension`) is the latest version + 1: every commit ever made, however many history entries were read and even after old log files are cleaned up.
+
+### Freshness
+
+`freshness` (also copied to the table's `catalog.json` entry) comes from the data-changing commits in the history (`config.DATA_OPERATIONS`: `WRITE`, `MERGE`, `DELETE`, `UPDATE`):
+
+- `lastWrite`, `secondsSinceLastWrite` — the newest data commit, and its age at profiling time
+- `typicalIntervalSeconds` — median of the last `config.FRESHNESS_GAPS` (49) gaps between data commits; `null` with only one commit. Gaps under `config.BURST_GAP_SECONDS` (60) are left out, so a burst of commits such as a backfill counts as one write. A table with fewer than `config.MIN_INTERVAL_GAPS` (3) longer gaps really does write that often, so all its gaps count
+- `burstGapSeconds` — the burst threshold applied, or `null` when all gaps counted
+- `ratio` — `secondsSinceLastWrite / typicalIntervalSeconds`
+- `intervalGaps`, `dataCommits` — gaps used for the interval, and data commits in the history
+- `null` when the history has no data commits.
 
 ---
 
 ## Profiler
 
-**`profiler.profile(df: pl.DataFrame) → dict[str, dict]`**
+**`profiler.profile(lf: pl.LazyFrame, schema, now=None) → dict[str, dict]`**
 
-Returns a dict keyed by column name. Field names are OpenMetadata-aligned.
+Returns a dict keyed by column name. Field names are OpenMetadata-aligned. Every column's statistics are computed in a single streaming pass over `lf`; `now` (default: the current UTC time) is the profiling time used to mark partial periods in time distributions.
 
 ### Numeric columns
 
@@ -194,7 +210,7 @@ Returns a dict keyed by column name. Field names are OpenMetadata-aligned.
 
 `uniqueCount`, `top`, and `freq` are **absent** (not present as `None`).
 
-### Non-numeric columns (string, date, boolean, etc.)
+### Other columns (string, boolean, etc.)
 
 | Field | Description |
 |---|---|
@@ -206,6 +222,22 @@ Returns a dict keyed by column name. Field names are OpenMetadata-aligned.
 
 `mean`, `stddev`, `min`, `firstQuartile`, `median`, `thirdQuartile`, and `max` are **absent**.
 
+### Temporal columns (date, timestamp, duration, time)
+
+`valuesCount`, `nullCount`, and `min`/`max` as ISO strings. Date and timestamp columns also get a `distribution`, built from per-hour (timestamp) or per-day (date) row counts gathered in the same single pass as the other statistics:
+
+| Field | Description |
+|---|---|
+| `grain` | `monthly` (every value is midnight on the 1st), `daily` (every value is midnight) or `sub-daily` |
+| `bucketing` | Time zone tz-aware timestamps were converted to before bucketing (`config.BUCKET_TIMEZONE`, default `UTC`), or `naive`/`date` for values bucketed as stored |
+| `year`, `month`, `day` | Row counts per period that has rows |
+| `weekday`, `hour` | Row counts per weekday and hour of day, every slot listed; `hour` only for sub-daily timestamps |
+| `daysWithData`, `missingDays`, `largestGap` | Days with rows, days without rows between the first and last, and the longest run of those |
+| `gaps` | Runs of missing days (or months, for monthly columns), largest first |
+| `rowsPerDay` | min, p5, median, p95 and max rows per day with data, excluding the partial day; not for monthly columns |
+| `partialDay`, `partialMonth` | The day and month still in progress at profiling time |
+| `sameAs` | Set when the column's per-day counts repeat another column's: `derived` for a date matching a timestamp, `identical` otherwise |
+
 ### Float safety
 
 Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to 6 decimal places.
@@ -214,13 +246,14 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
 
 ## Writer
 
-**`writer.write_output(catalog, table_docs, output_dir) → None`**
+`generate` writes the output incrementally, so a long run leaves a usable catalogue behind as it goes:
 
-1. Creates `output_dir` if it does not exist.
-2. Deletes and recreates `output_dir/tables/`.
-3. Writes `output_dir/catalog.json`.
-4. For each `TableDoc`, writes `output_dir/tables/{fullyQualifiedName.replace(".", "/")}.json`, creating intermediate directories as needed.
-5. Copies frontend assets from the package's `frontend/` directory into `output_dir`.
+1. `init_output_dir` creates `output_dir` if it does not exist, and deletes and recreates `output_dir/tables/`.
+2. `copy_frontend` copies the assets from the package's `frontend/` directory into `output_dir`, and an empty `catalog.json` is written.
+3. As each table finishes, `write_table_doc` writes `output_dir/tables/{fullyQualifiedName.replace(".", "/")}.json` (creating intermediate directories as needed) and `catalog.json` is rewritten with the tables so far.
+4. `write_llm_docs` writes `llms.txt` and one `tables/{path}.md` per table once every table is profiled.
+
+`write_output(catalog, table_docs, output_dir, base_url=None)` does all of that in one call, for already-profiled tables.
 
 **JSON serialisation:** Dataclasses are recursively converted to plain dicts. `float` values that are `NaN` or `±Inf` are replaced with `null`. Output is UTF-8, indented with 2 spaces.
 
@@ -243,7 +276,8 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
       "updatedAt": "<ISO 8601 UTC>",
       "rowCount": 1000000,
       "columnCount": 12,
-      "description": "Raw clickstream events"
+      "description": "Raw clickstream events",
+      "freshness": {"lastWrite": "<ISO 8601 UTC>", "secondsSinceLastWrite": 900, "typicalIntervalSeconds": 3600, "intervalGaps": 49, "burstGapSeconds": 60, "dataCommits": 812, "ratio": 0.25}
     }
   ]
 }
@@ -265,7 +299,8 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
       "nullable": true,
       "ordinalPosition": 1,
       "precision": null,
-      "scale": null
+      "scale": null,
+      "partitioned": false
     }
   ],
   "tableProfile": {
@@ -287,7 +322,32 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
         "max": 1000000.0,
         "uniqueCount": null,
         "top": null,
-        "freq": null
+        "freq": null,
+        "distribution": null
+      },
+      {
+        "name": "ts",
+        "timestamp": "<ISO 8601 UTC>",
+        "valuesCount": 1000000.0,
+        "nullCount": 0.0,
+        "min": "2026-09-01T02:04:50+00:00",
+        "max": "2026-11-06T13:24:03+00:00",
+        "distribution": {
+          "grain": "sub-daily",
+          "bucketing": "UTC",
+          "partialDay": "2026-11-06",
+          "partialMonth": "2026-11",
+          "daysWithData": 66,
+          "missingDays": 1,
+          "largestGap": {"start": "2026-10-04", "end": "2026-10-04", "days": 1},
+          "gaps": [{"start": "2026-10-04", "end": "2026-10-04", "count": 1}],
+          "rowsPerDay": {"min": 9800, "p5": 14100.5, "median": 15200, "p95": 16050.25, "max": 17000},
+          "year": {"2026": 1000000},
+          "month": {"2026-09": 450000, "2026-10": 460000, "2026-11": 90000},
+          "day": {"2026-09-01": 9800, "...": 0},
+          "weekday": {"Mon": 142000, "Tue": 143000, "Wed": 144000, "Thu": 143500, "Fri": 142500, "Sat": 142000, "Sun": 143000},
+          "hour": {"00": 41000, "...": 0, "23": 41500}
+        }
       }
     ]
   },
@@ -306,11 +366,14 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
         "engine_info": "Delta-Rust/0.19.0"
       }
     ]
-  }
+  },
+  "partitionColumns": [],
+  "commitCount": 84142,
+  "freshness": {"lastWrite": "<ISO 8601 UTC>", "secondsSinceLastWrite": 900, "typicalIntervalSeconds": 3600, "intervalGaps": 49, "burstGapSeconds": 60, "dataCommits": 812, "ratio": 0.25}
 }
 ```
 
-`description` is `null` when the Delta table has no description. `sampleData` is `null` when `--sample-data-count` is `0` or the table is excluded. `extension` is `null` when the Delta table has no history.
+`description` is `null` when the Delta table has no description. `sampleData` is `null` when `--sample-data-count` is `0` or the table is excluded. `extension` is `null` when the Delta table has no history. `freshness` is `null` when the history has no data-changing commits. `"..."` in the example above stands for the omitted per-day and per-hour entries.
 
 ---
 
@@ -318,8 +381,8 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
 
 Written at the end of `generate`, next to the JSON, so the same static server exposes them. Point an agent with a fetch tool at `<server>/llms.txt` and it can follow the links to each table.
 
-- `llms.txt` — one section per group (the fully qualified name minus the table name, e.g. `gadgetbridge.gold`), one linked line per table with its description, row and column counts.
-- `tables/{path}.md` — description, row/column counts, partition columns, location, schema, statistics (nulls, distinct, min, mean, max, most common), sample rows, the last 5 history entries, and links to the other tables in the same group, to the table's JSON and back to `llms.txt`.
+- `llms.txt` — one section per group (the fully qualified name minus the table name, e.g. `gadgetbridge.gold`), one linked line per table with its description, row and column counts, and the age of its last write compared to its typical write interval.
+- `tables/{path}.md` — description, row/column counts, partition columns, location, total Delta commits, last write and typical write interval, schema, statistics (nulls, distinct, min, mean, max, most common), a time distribution per date/timestamp column (grain, bucketing time zone, rows per day, gaps, a year × month grid with the partial month marked, rows by weekday and hour; a column with the same per-day counts as another is collapsed to one line), sample rows, the last 5 history entries, and links to the other tables in the same group, to the table's JSON and back to `llms.txt`.
 
 Links are relative to the file they appear in, unless `--base-url` is given. Use `--base-url` when the files will be pasted into a chat rather than fetched, so the links still resolve. If the docs are published where a cloud-hosted LLM can reach them, consider generating without `--sample-data-count`.
 
@@ -333,5 +396,5 @@ Links are relative to the file they appear in, unless `--base-url` is given. Use
 
 - Tables with zero columns
 - Incremental / append-only catalog updates
-- S3 credential configuration (delegated to `fsspec`/`s3fs` conventions)
+- S3 credential configuration: only the endpoint (`AWS_ENDPOINT_URL_S3`) is passed explicitly; credentials come from the standard `AWS_*` environment variables, read by `fsspec`/`s3fs` when scanning and by `deltalake`/Polars when reading tables
 - Column ordering guarantees beyond schema order

@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import deltalake
 import polars as pl
 
+from datalake_doco.freshness import freshness
 from datalake_doco.models import (
     Column,
     ColumnProfile,
@@ -82,7 +83,8 @@ class DeltaReader:
         lf = pl.scan_delta(uri, storage_options=storage_options)
         schema = lf.collect_schema()
 
-        timestamp = datetime.now(UTC).isoformat()
+        now = datetime.now(UTC)
+        timestamp = now.isoformat()
 
         delta_schema = dt.schema()
         nullable_by_name = {f.name: f.nullable for f in delta_schema.fields}
@@ -105,7 +107,7 @@ class DeltaReader:
 
         row_count = lf.select(pl.len()).collect(engine="streaming").item()
 
-        raw_stats = profile(lf, schema)
+        raw_stats = profile(lf, schema, now)
         column_profiles = []
         for col, s in raw_stats.items():
             column_profiles.append(ColumnProfile(
@@ -123,6 +125,7 @@ class DeltaReader:
                 uniqueCount=s.get("uniqueCount"),
                 top=s.get("top"),
                 freq=s.get("freq"),
+                distribution=s.get("distribution"),
             ))
 
         table_profile = TableProfile(
@@ -164,4 +167,8 @@ class DeltaReader:
             partitionColumns=partition_columns,
             sampleData=sample_data,
             extension={"deltaHistory": history} if history else None,
+            freshness=freshness(history, now),
+            # Versions are numbered from 0 without gaps, so this counts every commit ever made,
+            # including those whose log files have since been cleaned up or weren't read.
+            commitCount=dt.version() + 1,
         )

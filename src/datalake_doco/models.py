@@ -31,14 +31,15 @@ class ColumnProfile:
     nullCount: float | None = None
     mean: float | None = None
     stddev: float | None = None
-    min: float | None = None
+    min: float | str | None = None
     firstQuartile: float | None = None
     median: float | None = None
     thirdQuartile: float | None = None
-    max: float | None = None
+    max: float | str | None = None
     uniqueCount: int | None = None
     top: str | None = None
     freq: int | None = None
+    distribution: dict[str, Any] | None = None
 
 
 @dataclass
@@ -67,6 +68,8 @@ class TableDoc:
     partitionColumns: list[str] = field(default_factory=list)
     sampleData: SampleData | None = None
     extension: dict[str, Any] | None = None
+    freshness: dict[str, Any] | None = None
+    commitCount: int | None = None
 
 
 @dataclass
@@ -79,6 +82,7 @@ class CatalogEntry:
     rowCount: int
     columnCount: int
     description: str | None = None
+    freshness: dict[str, Any] | None = None
 
 
 @dataclass
