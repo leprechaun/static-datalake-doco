@@ -5,6 +5,11 @@
 
 ## Purpose
 
+<img width="300" alt="Image" src="https://github.com/user-attachments/assets/553ee789-b0fe-45be-925b-7e920024cba3" />
+<img width="300" alt="Image" src="https://github.com/user-attachments/assets/2c53cfb7-a966-45b2-8b7b-69ef3cb4d8dc" />
+<img width="300" alt="Image" src="https://github.com/user-attachments/assets/11826c47-98db-4b6a-b3ac-3a97e4149f9a" />
+<img width="300" alt="Image" src="https://github.com/user-attachments/assets/fcd5b2df-2e60-46c8-b8fb-6e2e9c22f07e" />
+
 ```
 a.k.a. "Poor Man's Data Catalogue"
 ```
