@@ -3,7 +3,7 @@
 import posixpath
 
 from datalake_doco.config import MAX_GAP_RANGES
-from datalake_doco.models import Catalog, CatalogEntry, TableDoc
+from datalake_doco.models import Catalog, CatalogEntry, Column, TableDoc
 
 RECENT_HISTORY_COUNT = 5
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -204,6 +204,14 @@ def render_llms_txt(catalog: Catalog, base_url: str | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _column_description(column: Column) -> str:
+    """The column's description followed by its tags, e.g. "Heart rate (unit: bpm)"."""
+    tags = "; ".join(f"{k}: {v}" for k, v in column.tags.items())
+    if column.description and tags:
+        return f"{column.description} ({tags})"
+    return column.description or tags
+
+
 def render_table_md(doc: TableDoc, related: list[CatalogEntry], base_url: str | None = None) -> str:
     fqn = doc.fullyQualifiedName
     here = table_md_path(fqn)
@@ -229,10 +237,12 @@ def render_table_md(doc: TableDoc, related: list[CatalogEntry], base_url: str | 
         "## Schema",
         "",
     ]
+    documented = any(c.description or c.tags for c in doc.columns)
     lines += _table(
-        ["Column", "Type", "Nullable", "Partition"],
+        ["Column", "Type", "Nullable", "Partition", *(["Description"] if documented else [])],
         [
-            [c.name, c.dataType, "yes" if c.nullable else "no", "yes" if c.partitioned else ""]
+            [c.name, c.dataType, "yes" if c.nullable else "no", "yes" if c.partitioned else "",
+             *([_column_description(c)] if documented else [])]
             for c in doc.columns
         ],
     )

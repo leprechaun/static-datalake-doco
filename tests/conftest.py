@@ -17,11 +17,12 @@ DEFAULT_HISTORY = [
 ]
 
 
-def make_field(name, nullable=True):
+def make_field(name, nullable=True, metadata=None):
     """Build a mock DeltaTable schema field."""
     f = MagicMock()
     f.name = name
     f.nullable = nullable
+    f.metadata = metadata or {}
     return f
 
 

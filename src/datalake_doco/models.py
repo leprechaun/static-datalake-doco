@@ -21,6 +21,8 @@ class Column:
     precision: int | None = None
     scale: int | None = None
     partitioned: bool = False
+    description: str | None = None
+    tags: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

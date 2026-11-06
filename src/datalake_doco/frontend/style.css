@@ -302,6 +302,20 @@ tbody tr:hover td { background: var(--bg); }
   color: var(--muted);
 }
 
+.column-description { white-space: normal; min-width: 24ch; }
+
+.column-tag {
+  display: inline-block;
+  font-size: 11px;
+  background: var(--code-bg);
+  color: var(--muted);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+
+.column-tag:first-child { margin-left: 0; }
+
 .null-cell { color: var(--muted); font-style: italic; }
 
 .param-key { font-weight: 600; color: var(--text); }

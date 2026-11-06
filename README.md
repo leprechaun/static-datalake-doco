@@ -128,6 +128,10 @@ Each column in the polars schema produces one `Column`:
 - `ordinalPosition` — 1-indexed position in the schema
 - `precision`, `scale` — set only for `DECIMAL`; `None` otherwise
 - `partitioned` — whether the column is one of the Delta table's partition columns (also listed in `TableDoc.partitionColumns`)
+- `description` — the Delta field metadata's `description` key, or Spark's `comment` when there is none
+- `tags` — every other field metadata key, such as `unit`; keys written by Delta and Spark themselves (`delta.*`, `__*`) are left out
+
+The table page and the Schema tab show the description and tags in a Description column, e.g. "Heart rate (unit: bpm)". The column is omitted when no column is documented.
 
 **Type mapping:**
 
@@ -300,7 +304,9 @@ Any stat that is `NaN` or `±Inf` is replaced with `null`. Values are rounded to
       "ordinalPosition": 1,
       "precision": null,
       "scale": null,
-      "partitioned": false
+      "partitioned": false,
+      "description": "Event id",
+      "tags": {"unit": "count"}
     }
   ],
   "tableProfile": {

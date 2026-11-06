@@ -291,20 +291,29 @@ function activateTab(tabEl) {
 
 /* ── Schema tab ─────────────────────────────────────────────────── */
 function renderSchema(doc) {
-  const rows = (doc.columns || []).map(col => `
+  const columns = doc.columns || [];
+  const documented = columns.some(col => col.description || Object.keys(col.tags || {}).length);
+  const rows = columns.map(col => `
     <tr>
       <td>${esc(col.name)}</td>
       <td><span class="type-badge">${esc(col.dataType)}</span></td>
       <td>${col.nullable ? "" : '<span style="color:#dc3545">✗</span>'}</td>
+      ${documented ? `<td class="column-description">${columnDescription(col)}</td>` : ""}
     </tr>
   `).join("");
 
   return `<div class="data-table-wrap">
     <table>
-      <thead><tr><th>Column</th><th>Type</th><th>Nullable</th></tr></thead>
+      <thead><tr><th>Column</th><th>Type</th><th>Nullable</th>${documented ? "<th>Description</th>" : ""}</tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+}
+
+function columnDescription(col) {
+  const tags = Object.entries(col.tags || {}).map(([k, v]) =>
+    `<span class="column-tag">${esc(k)}: ${esc(typeof v === "string" ? v : JSON.stringify(v))}</span>`).join("");
+  return (col.description ? `<span>${esc(col.description)}</span>` : "") + tags;
 }
 
 /* ── Stats tab ──────────────────────────────────────────────────── */

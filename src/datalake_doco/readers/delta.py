@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 import deltalake
 import polars as pl
@@ -48,6 +49,23 @@ def _polars_type(dtype: pl.DataType) -> tuple[str, int | None, int | None]:
     return (str(dtype).upper(), None, None)
 
 
+# Field metadata keys that hold a column's description: our own, then Spark's convention.
+DESCRIPTION_KEYS = ("description", "comment")
+# Field metadata written by Delta and Spark themselves (column mapping ids, generated-column
+# expressions, char/varchar lengths), not by whoever documented the table.
+INTERNAL_KEY_PREFIXES = ("delta.", "__")
+
+
+def _column_metadata(metadata: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    """Split a Delta field's metadata into its description and the remaining tags (e.g. unit)."""
+    description = next((metadata[k] for k in DESCRIPTION_KEYS if metadata.get(k)), None)
+    tags = {
+        k: v for k, v in metadata.items()
+        if k not in DESCRIPTION_KEYS and not k.startswith(INTERNAL_KEY_PREFIXES)
+    }
+    return (str(description) if description is not None else None), tags
+
+
 def _parse_history(raw: list[dict]) -> list[HistoryEntry]:
     entries = []
     for item in raw:
@@ -87,7 +105,7 @@ class DeltaReader:
         timestamp = now.isoformat()
 
         delta_schema = dt.schema()
-        nullable_by_name = {f.name: f.nullable for f in delta_schema.fields}
+        fields_by_name = {f.name: f for f in delta_schema.fields}
         metadata = dt.metadata()
         partition_columns = metadata.partition_columns
         partitioned_set = set(partition_columns)
@@ -95,14 +113,18 @@ class DeltaReader:
         columns = []
         for pos, (col, dtype) in enumerate(schema.items(), start=1):
             data_type, precision, scale = _polars_type(dtype)
+            delta_field = fields_by_name.get(col)
+            description, tags = _column_metadata((delta_field.metadata if delta_field else None) or {})
             columns.append(Column(
                 name=col,
                 dataType=data_type,
-                nullable=nullable_by_name.get(col, True),
+                nullable=delta_field.nullable if delta_field else True,
                 ordinalPosition=pos,
                 precision=precision,
                 scale=scale,
                 partitioned=col in partitioned_set,
+                description=description,
+                tags=tags,
             ))
 
         row_count = lf.select(pl.len()).collect(engine="streaming").item()

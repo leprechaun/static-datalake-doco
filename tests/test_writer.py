@@ -14,8 +14,8 @@ from datalake_doco.models import (
 from datalake_doco.writer import write_output
 
 
-def make_column(name="id", data_type="BIGINT", nullable=True, ordinal=1, partitioned=False):
-    return Column(name=name, dataType=data_type, nullable=nullable, ordinalPosition=ordinal, partitioned=partitioned)
+def make_column(name="id", data_type="BIGINT", nullable=True, ordinal=1, partitioned=False, **kwargs):
+    return Column(name=name, dataType=data_type, nullable=nullable, ordinalPosition=ordinal, partitioned=partitioned, **kwargs)
 
 
 def make_profile(name="id", **kwargs):

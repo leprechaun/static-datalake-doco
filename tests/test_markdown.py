@@ -237,6 +237,23 @@ def test_table_md_without_related_has_no_section():
     assert "Other tables" not in render_table_md(_doc("src.bronze.events"), [])
 
 
+def test_table_md_schema_has_no_description_column_when_undocumented():
+    assert "Description" not in render_table_md(_doc("src.bronze.events"), [])
+
+
+def test_table_md_schema_column_descriptions_and_tags():
+    columns = [
+        make_column(name="hr", data_type="DOUBLE", description="Heart rate", tags={"unit": "bpm"}),
+        make_column(name="steps", data_type="BIGINT", tags={"unit": "count"}),
+        make_column(name="id"),
+    ]
+    text = render_table_md(_doc("src.bronze.events", columns=columns), [])
+    assert "| Column | Type | Nullable | Partition | Description |" in text
+    assert "| hr | DOUBLE | yes |  | Heart rate (unit: bpm) |" in text
+    assert "| steps | BIGINT | yes |  | unit: count |" in text
+    assert "| id | BIGINT | yes |  |  |" in text
+
+
 def test_table_md_lists_partition_columns():
     doc = _doc("src.bronze.events", partitionColumns=["day"], columns=[make_column(partitioned=True)])
     assert "- Partitioned by: day" in render_table_md(doc, [])

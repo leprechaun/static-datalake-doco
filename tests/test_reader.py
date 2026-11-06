@@ -102,6 +102,29 @@ def test_nullable_read_from_delta_schema():
     assert doc.columns[0].nullable is False
 
 
+def test_column_description_and_tags_read_from_field_metadata():
+    df = pl.DataFrame({"hr": pl.Series([60.0]), "id": pl.Series([1])})
+    fields = [
+        make_field("hr", metadata={"description": "Heart rate", "unit": "bpm", "delta.columnMapping.id": 1}),
+        make_field("id"),
+    ]
+    with _read_ctx(df, fields=fields):
+        doc = DeltaReader().read("/fake/path", "t")
+    assert doc.columns[0].description == "Heart rate"
+    assert doc.columns[0].tags == {"unit": "bpm"}
+    assert doc.columns[1].description is None
+    assert doc.columns[1].tags == {}
+
+
+def test_spark_comment_is_a_column_description():
+    df = pl.DataFrame({"id": pl.Series([1])})
+    fields = [make_field("id", metadata={"comment": "Row id", "__CHAR_VARCHAR_TYPE_STRING": "varchar(8)"})]
+    with _read_ctx(df, fields=fields):
+        doc = DeltaReader().read("/fake/path", "t")
+    assert doc.columns[0].description == "Row id"
+    assert doc.columns[0].tags == {}
+
+
 def test_datatype_mapped_from_polars_dtype():
     df = pl.DataFrame({
         "i": pl.Series([1], dtype=pl.Int64),
