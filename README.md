@@ -22,6 +22,11 @@ Each table's documentation includes the schema, row count, version history, stat
 
 ## Usage
 
+```sh
+uv tool install datalake-doco    # or: pipx install datalake-doco
+datalake-doco generate s3://my-bucket --output docs && python -m http.server 8000 --directory docs
+```
+
 `datalake-doco generate` scans one or more filesystem or S3 roots for Delta Lake tables, profiles each table, and writes a static JSON catalog plus per-table JSON documents to an output directory. The output is self-contained and can be served by any static HTTP server.
 
 ---
