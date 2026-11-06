@@ -53,3 +53,54 @@ jobs:
         with:
           token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
           files: coverage.lcov
+
+  build:
+    needs: test
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.3
+
+      # pyproject.toml keeps a placeholder; published versions are 0.1.<run number>.
+      - name: Set version from build number
+        run: uv version "0.1.${{ github.run_number }}" --no-sync
+
+      - name: Build
+        run: uv build
+
+      # Install the built wheel, not the source tree, so missing package files fail here.
+      - name: Smoke-test the installed CLI
+        run: |
+          uv venv /tmp/smoke
+          VIRTUAL_ENV=/tmp/smoke uv pip install dist/*.whl
+          /tmp/smoke/bin/python -c "import deltalake as d; d.DeltaTable.create('/tmp/lake/src/silver/t', d.Schema([d.Field('id', 'long')]))"
+          /tmp/smoke/bin/datalake-doco generate /tmp/lake --output /tmp/out
+          test -f /tmp/out/index.html && test -f /tmp/out/app.js && test -f /tmp/out/style.css && test -f /tmp/out/llms.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # required for PyPI trusted publishing
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - uses: astral-sh/setup-uv@v10.3.3
+
+      # --check-url skips files PyPI already has, so re-running a workflow doesn't fail.
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple/

@@ -9,8 +9,12 @@ dependencies = [
     "polars>=1.0",
     "fsspec>=2024.2",
     "s3fs>=2024.2",
-    "ruff>=0.17.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/leprechaun/static-datalake-doco"
+Repository = "https://github.com/leprechaun/static-datalake-doco"
+Issues = "https://github.com/leprechaun/static-datalake-doco/issues"
 
 [project.scripts]
 datalake-doco = "datalake_doco.cli:main"
@@ -19,6 +23,7 @@ datalake-doco = "datalake_doco.cli:main"
 dev = [
     "pytest>=8.0",
     "pytest-cov>=7.1.0",
+    "ruff>=0.17.1",
 ]
 
 [tool.pytest.ini_options]
@@ -28,6 +33,9 @@ testpaths = ["tests"]
 ignore = [
     "BLE001", # broad except is intentional: skip one bad table/path rather than aborting the whole run
 ]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md"]
 
 [build-system]
 requires = ["hatchling"]
