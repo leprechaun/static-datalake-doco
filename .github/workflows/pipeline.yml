@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -63,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
 
       # pyproject.toml keeps a placeholder; published versions are 0.1.<run number>.
       - name: Set version from build number
@@ -99,7 +99,7 @@ jobs:
           name: dist
           path: dist/
 
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
 
       # --check-url skips files PyPI already has, so re-running a workflow doesn't fail.
       - name: Publish to PyPI
